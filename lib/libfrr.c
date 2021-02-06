@@ -187,12 +187,6 @@ static const struct optspec os_user = {"u:g:",
 				       lo_user};
 
 
-//specific parameter to load a lsdb file (specific to IS-IS)
-static const struct option lo_lsdb_load[] = {{"lsdb", required_argument,NULL,'l'},
-					     {NULL}};
-static const struct optspec os_lsdb_load = {"l:",
-					    "  -l, --lsdb	 File of the lsdb to load\n",
-					    lo_lsdb_load};
 
 bool frr_zclient_addr(struct sockaddr_storage *sa, socklen_t *sa_len,
 		      const char *path)
@@ -332,9 +326,6 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 		opt_extend(&os_vty);
 	if (di->flags & FRR_DETACH_LATER)
 		nodetach_daemon = true;
-	if (strcmp(di->progname,"isisd") == 0)
-		opt_extend(&os_lsdb_load);		//use to specify a lsdb file to load (only work with IS-IS)
-	
 
 	frr_init_vtydir();
 	snprintf(config_default, sizeof(config_default), "%s/%s.conf",
