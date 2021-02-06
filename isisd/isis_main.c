@@ -86,6 +86,7 @@ struct zebra_privs_t isisd_privs = {
 /* isisd options */
 static const struct option longopts[] = {
 	{"int_num", required_argument, NULL, 'I'},
+	{"lsdb_file", required_argument, NULL, 'L'},
 	{0}};
 
 /* Master of threads. */
@@ -202,6 +203,7 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 	int instance = 1;
+	char *lsdb_file;
 
 #ifdef FABRICD
 	frr_preinit(&fabricd_di, argc, argv);
@@ -209,8 +211,9 @@ int main(int argc, char **argv, char **envp)
 	frr_preinit(&isisd_di, argc, argv);
 #endif
 	frr_opt_add(
-		"I:", longopts,
-		"  -I, --int_num      Set instance number (label-manager)\n");
+		"I:L:", longopts,
+		"  -I, --int_num      Set instance number (label-manager)\n"
+		"  -L, --lsdb_file    The lsdb file to load \n");
 
 	/* Command line argument treatment. */
 	while (1) {
@@ -228,6 +231,9 @@ int main(int argc, char **argv, char **envp)
 				zlog_err("Instance %i out of range (1..%u)",
 					 instance, (unsigned short)-1);
 			break;
+		case 'L':
+			lsdb_file = optarg;
+			break;		
 		default:
 			frr_help_exit(1);
 			break;
