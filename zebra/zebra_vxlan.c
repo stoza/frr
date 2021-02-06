@@ -4071,7 +4071,6 @@ int zebra_vxlan_dp_network_mac_add(struct interface *ifp,
  * 1. readd the remote MAC if we have it
  * 2. local MAC with does ES may also need to be re-installed
  */
-static int zebra_vxlan_do_local_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac);
 int zebra_vxlan_dp_network_mac_del(struct interface *ifp,
 				   struct interface *br_if,
 				   struct ethaddr *macaddr, vlanid_t vid)
@@ -4122,72 +4121,7 @@ int zebra_vxlan_dp_network_mac_del(struct interface *ifp,
 		if (IS_ZEBRA_DEBUG_VXLAN || IS_ZEBRA_DEBUG_EVPN_MH_MAC)
 			zlog_debug("dpDel local-nw-MAC %pEA VNI %u", macaddr,
 				   vni);
-		zebra_vxlan_do_local_mac_del(zevpn, mac);
-	}
-
-	return 0;
-}
-
-static int zebra_vxlan_do_local_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
-{
-	bool old_bgp_ready;
-	bool new_bgp_ready;
-
-	if (IS_ZEBRA_DEBUG_VXLAN)
-		zlog_debug("DEL MAC %pEA VNI %u seq %u flags 0x%x nbr count %u",
-			   &mac->macaddr, zevpn->vni, mac->loc_seq, mac->flags,
-			   listcount(mac->neigh_list));
-
-	old_bgp_ready = zebra_evpn_mac_is_ready_for_bgp(mac->flags);
-	if (zebra_evpn_mac_is_static(mac)) {
-		/* this is a synced entry and can only be removed when the
-		 * es-peers stop advertising it.
-		 */
-		memset(&mac->fwd_info, 0, sizeof(mac->fwd_info));
-
-		if (IS_ZEBRA_DEBUG_EVPN_MH_MAC)
-			zlog_debug(
-				"re-add sync-mac vni %u mac %pEA es %s seq %d f 0x%x",
-				zevpn->vni, &mac->macaddr,
-				mac->es ? mac->es->esi_str : "-", mac->loc_seq,
-				mac->flags);
-
-		/* inform-bgp about change in local-activity if any */
-		if (!CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL_INACTIVE)) {
-			SET_FLAG(mac->flags, ZEBRA_MAC_LOCAL_INACTIVE);
-			new_bgp_ready =
-				zebra_evpn_mac_is_ready_for_bgp(mac->flags);
-			zebra_evpn_mac_send_add_del_to_client(
-				mac, old_bgp_ready, new_bgp_ready);
-		}
-
-		/* re-install the entry in the kernel */
-		zebra_evpn_sync_mac_dp_install(mac, false /* set_inactive */,
-					       false /* force_clear_static */,
-					       __func__);
-
-		return 0;
-	}
-
-	/* Update all the neigh entries associated with this mac */
-	zebra_evpn_process_neigh_on_local_mac_del(zevpn, mac);
-
-	/* Remove MAC from BGP. */
-	zebra_evpn_mac_send_del_to_client(zevpn->vni, &mac->macaddr, mac->flags,
-					  false /* force */);
-
-	zebra_evpn_es_mac_deref_entry(mac);
-
-	/*
-	 * If there are no neigh associated with the mac delete the mac
-	 * else mark it as AUTO for forward reference
-	 */
-	if (!listcount(mac->neigh_list)) {
-		zebra_evpn_mac_del(zevpn, mac);
-	} else {
-		UNSET_FLAG(mac->flags, ZEBRA_MAC_ALL_LOCAL_FLAGS);
-		UNSET_FLAG(mac->flags, ZEBRA_MAC_STICKY);
-		SET_FLAG(mac->flags, ZEBRA_MAC_AUTO);
+		return zebra_evpn_del_local_mac(zevpn, mac);
 	}
 
 	return 0;
@@ -4224,7 +4158,7 @@ int zebra_vxlan_local_mac_del(struct interface *ifp, struct interface *br_if,
 	if (!CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL))
 		return 0;
 
-	return zebra_vxlan_do_local_mac_del(zevpn, mac);
+	return zebra_evpn_del_local_mac(zevpn, mac);
 }
 
 /*
@@ -6115,9 +6049,9 @@ static void zebra_vxlan_sg_ref(struct in_addr local_vtep_ip,
 	zebra_vxlan_sg_do_ref(zvrf, local_vtep_ip, mcast_grp);
 }
 
-static void zebra_vxlan_xg_pre_cleanup(struct hash_bucket *backet, void *arg)
+static void zebra_vxlan_xg_pre_cleanup(struct hash_bucket *bucket, void *arg)
 {
-	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)backet->data;
+	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)bucket->data;
 
 	/* increment the ref count against (*,G) to prevent them from being
 	 * deleted
@@ -6126,9 +6060,9 @@ static void zebra_vxlan_xg_pre_cleanup(struct hash_bucket *backet, void *arg)
 		++vxlan_sg->ref_cnt;
 }
 
-static void zebra_vxlan_xg_post_cleanup(struct hash_bucket *backet, void *arg)
+static void zebra_vxlan_xg_post_cleanup(struct hash_bucket *bucket, void *arg)
 {
-	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)backet->data;
+	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)bucket->data;
 
 	/* decrement the dummy ref count against (*,G) to delete them */
 	if (vxlan_sg->sg.src.s_addr == INADDR_ANY) {
@@ -6139,9 +6073,9 @@ static void zebra_vxlan_xg_post_cleanup(struct hash_bucket *backet, void *arg)
 	}
 }
 
-static void zebra_vxlan_sg_cleanup(struct hash_bucket *backet, void *arg)
+static void zebra_vxlan_sg_cleanup(struct hash_bucket *bucket, void *arg)
 {
-	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)backet->data;
+	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)bucket->data;
 
 	zebra_vxlan_sg_del(vxlan_sg);
 }
@@ -6159,9 +6093,9 @@ static void zebra_vxlan_cleanup_sg_table(struct zebra_vrf *zvrf)
 	hash_iterate(zvrf->vxlan_sg_table, zebra_vxlan_xg_post_cleanup, NULL);
 }
 
-static void zebra_vxlan_sg_replay_send(struct hash_bucket *backet, void *arg)
+static void zebra_vxlan_sg_replay_send(struct hash_bucket *bucket, void *arg)
 {
-	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)backet->data;
+	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)bucket->data;
 
 	zebra_vxlan_sg_send(vxlan_sg->zvrf, &vxlan_sg->sg,
 			vxlan_sg->sg_str, ZEBRA_VXLAN_SG_ADD);

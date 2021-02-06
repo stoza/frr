@@ -1753,14 +1753,13 @@ static int bgp_attr_aggregator(struct bgp_attr_parser_args *args)
 	attr->aggregator_as = aggregator_as;
 	attr->aggregator_addr.s_addr = stream_get_ipv4(peer->curr);
 
-	/* Set atomic aggregate flag. */
-	attr->flag |= ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR);
-
 	/* Codification of AS 0 Processing */
 	if (aggregator_as == BGP_AS_ZERO)
 		flog_err(EC_BGP_ATTR_LEN,
-			 "AGGREGATOR AS number is 0 for aspath: %s",
-			 aspath_print(attr->aspath));
+			 "%s: AGGREGATOR AS number is 0 for aspath: %s",
+			 peer->host, aspath_print(attr->aspath));
+	else
+		attr->flag |= ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR);
 
 	return BGP_ATTR_PARSE_PROCEED;
 }
@@ -1784,16 +1783,17 @@ bgp_attr_as4_aggregator(struct bgp_attr_parser_args *args,
 	}
 
 	aggregator_as = stream_getl(peer->curr);
+
 	*as4_aggregator_as = aggregator_as;
 	as4_aggregator_addr->s_addr = stream_get_ipv4(peer->curr);
-
-	attr->flag |= ATTR_FLAG_BIT(BGP_ATTR_AS4_AGGREGATOR);
 
 	/* Codification of AS 0 Processing */
 	if (aggregator_as == BGP_AS_ZERO)
 		flog_err(EC_BGP_ATTR_LEN,
-			 "AS4_AGGREGATOR AS number is 0 for aspath: %s",
-			 aspath_print(attr->aspath));
+			 "%s: AS4_AGGREGATOR AS number is 0 for aspath: %s",
+			 peer->host, aspath_print(attr->aspath));
+	else
+		attr->flag |= ATTR_FLAG_BIT(BGP_ATTR_AS4_AGGREGATOR);
 
 	return BGP_ATTR_PARSE_PROCEED;
 }
@@ -3901,7 +3901,7 @@ bgp_size_t bgp_packet_attribute(struct bgp *bgp, struct peer *peer,
 
 			/* Is ASN representable in 2-bytes? Or must AS_TRANS be
 			 * used? */
-			if (attr->aggregator_as > 65535) {
+			if (attr->aggregator_as > UINT16_MAX) {
 				stream_putw(s, BGP_AS_TRANS);
 
 				/* we have to send AS4_AGGREGATOR, too.
