@@ -322,7 +322,6 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 	umask(0027);
 
 	opt_extend(&os_always);
-	opt_extend(&os_lsdb_load);		//use to specify a lsdb file to load (only work with IS-IS) 
 	if (!(di->flags & FRR_NO_CFG_PID_DRY))
 		opt_extend(&os_cfg_pid_dry);
 	if (!(di->flags & FRR_NO_PRIVSEP))
@@ -333,6 +332,9 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 		opt_extend(&os_vty);
 	if (di->flags & FRR_DETACH_LATER)
 		nodetach_daemon = true;
+	if (strcmp(di->progname,"isisd") == 0)
+		opt_extend(&os_lsdb_load);		//use to specify a lsdb file to load (only work with IS-IS)
+	
 
 	frr_init_vtydir();
 	snprintf(config_default, sizeof(config_default), "%s/%s.conf",
