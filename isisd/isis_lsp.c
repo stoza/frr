@@ -2298,6 +2298,26 @@ int isis_lsp_iterate_is_reach(struct isis_lsp *lsp, uint16_t mtid,
 	return LSP_ITER_CONTINUE;
 }
 
+
+int test(struct thread *thread){
+	printf("OOOOOKKKKKKAYYYY \n");
+	return 1;
+}
+/**
+* function used to load a lsdb from 
+* a file 
+* create a new thread and put it in master
+* with probably thread_add_event but don't know
+* first is the threadmaster structure
+* then its the function which is int func(struct thread *thread) {chais pas pourquoi ce thread en argument}
+* then its argument (not clear yet)
+* the a fd (lets put 0)
+* then NULL because a struct thread **ref dont know what it is
+*/
+void isis_load_lsdb(char *filename,struct thread_master *master){
+	thread_add_event(master,test,NULL,0,NULL);
+}
+
 void lsp_init(void)
 {
 	hook_register(isis_adj_state_change_hook,

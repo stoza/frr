@@ -204,6 +204,7 @@ int main(int argc, char **argv, char **envp)
 	int opt;
 	int instance = 1;
 	char *lsdb_file;
+	int file_load = 0;
 
 #ifdef FABRICD
 	frr_preinit(&fabricd_di, argc, argv);
@@ -232,6 +233,7 @@ int main(int argc, char **argv, char **envp)
 					 instance, (unsigned short)-1);
 			break;
 		case 'L':
+			file_load = 1;
 			lsdb_file = optarg;
 			break;		
 		default:
@@ -279,6 +281,11 @@ int main(int argc, char **argv, char **envp)
 	fabricd_init();
 
 	frr_config_fork();
+	//here put a if we give a filename as input => put a task on thread master to insert all in the db
+	if(file_load){
+		zlog_debug("LSDB file provided"); //TODO does not work
+		isis_load_lsdb(lsdb_file,master);
+	}
 	frr_run(master);
 
 	/* Not reached. */
