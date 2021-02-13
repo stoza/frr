@@ -60,6 +60,11 @@
 #include "isisd/isis_tx_queue.h"
 #include "isisd/isis_nb.h"
 
+//macro use to define the json file
+#define JSON_FILE "lsdb.json"
+//extern global variable
+extern int file_load;
+
 static int lsp_refresh(struct thread *thread);
 static int lsp_l1_refresh_pseudo(struct thread *thread);
 static int lsp_l2_refresh_pseudo(struct thread *thread);
@@ -79,6 +84,19 @@ int lspdb_compare(const struct isis_lsp *a, const struct isis_lsp *b)
 void lsp_db_init(struct lspdb_head *head)
 {
 	lspdb_init(head);
+	//use to load the file 
+	if(file_load)
+		lsp_db_load(head,JSON_FILE);
+}
+
+/**
+* function used to load the lsdb 
+* must be in a json format
+* // TODO DO THE LOGIC 
+*/
+void lsp_db_load(struct lspdb_head *head, const char *filename){
+	printf("address of lsdb %p\n", head);
+	printf("string %s \n",filename);
 }
 
 void lsp_db_fini(struct lspdb_head *head)
@@ -2296,26 +2314,6 @@ int isis_lsp_iterate_is_reach(struct isis_lsp *lsp, uint16_t mtid,
 	}
 
 	return LSP_ITER_CONTINUE;
-}
-
-
-int test(struct thread *thread){
-	printf("OOOOOKKKKKKAYYYY \n");
-	return 1;
-}
-/**
-* function used to load a lsdb from 
-* a file 
-* create a new thread and put it in master
-* with probably thread_add_event but don't know
-* first is the threadmaster structure
-* then its the function which is int func(struct thread *thread) {chais pas pourquoi ce thread en argument}
-* then its argument (not clear yet)
-* the a fd (lets put 0)
-* then NULL because a struct thread **ref dont know what it is
-*/
-void isis_load_lsdb(char *filename,struct thread_master *master){
-	thread_add_event(master,test,NULL,0,NULL);
 }
 
 void lsp_init(void)

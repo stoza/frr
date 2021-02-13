@@ -154,7 +154,6 @@ void _lsp_flood(struct isis_lsp *lsp, struct isis_circuit *circuit,
 void lsp_init(void);
 
 //fonction to load a lsdb file inside the current lsdb
-int test(struct thread *thread);
-void isis_load_lsdb(char *filename, struct thread_master *master);
+void lsp_db_load(struct lspdb_head *head, const char *filename);
 
 #endif /* ISIS_LSP */
