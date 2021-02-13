@@ -1811,12 +1811,19 @@ json_object *json_hdr(struct isis_lsp_hdr hdr){
 //function used to dump the lsdb in a json file
 //TODO write it in a json
 void dump_lsdb_json(struct lspdb_head *head){
-	json_object *lspdb_json = json_object_new_object(); //create a new json_object	
+	json_object *lspdb_json = json_object_new_array(); //create a new json_object	
 	struct isis_lsp *lsp;
 	frr_each(lspdb, head,lsp){ //this is like a for loop the first thing is the time of structure (i think), the second is the pointer to the structure and the third is a pointer in which puting the elem
+		json_object *lsp_json = json_object_new_object();
 		json_object *hdr_json = json_hdr(lsp->hdr);
-		printf("%s\n",json_object_to_json_string(hdr_json));
+
+		//do the lsp json
+		json_object_object_add(lsp_json,"hdr",hdr_json);
+
+		//add it to the global output
+		json_object_array_add(lspdb_json,lsp_json);
 	}
+	printf("%s\n",json_object_to_json_string(lspdb_json));
 }
 
 static void isis_run_spf_with_protection(struct isis_area *area,
