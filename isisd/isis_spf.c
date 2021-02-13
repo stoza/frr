@@ -1783,12 +1783,34 @@ void isis_run_spf(struct isis_spftree *spftree)
 		dump_lsdb_json(spftree->lspdb);
 }
 
+//fonction to format in a json the hdr of a lsp
+//TODO QUE FAIRE POUR LE LSP_ID???
+json_object *json_hdr(struct isis_lsp_hdr hdr){
+	json_object *hdr_json = json_object_new_object();
+	//getting all the values problème with lsp_id??
+	json_object *pdu_len = json_object_new_int(hdr.pdu_len);
+	json_object *rem_lifetime = json_object_new_int(hdr.rem_lifetime);
+	json_object *seqno = json_object_new_int(hdr.seqno);
+	json_object *checksum = json_object_new_int(hdr.checksum);
+	json_object *lsp_bits = json_object_new_int(hdr.lsp_bits);
+
+	json_object_object_add(hdr_json,"pdu_len",pdu_len);
+	json_object_object_add(hdr_json,"rem_lifetime",rem_lifetime);
+	json_object_object_add(hdr_json,"seqno",seqno);
+	json_object_object_add(hdr_json,"checksum",checksum);
+	json_object_object_add(hdr_json,"lsp_bits",lsp_bits);
+
+	return hdr_json;
+}
+
 //function used to dump the lsdb in a json file
 //TODO write it in a json
 void dump_lsdb_json(struct lspdb_head *head){
+	json_object *lspdb_json = json_object_new_object(); //create a new json_object	
 	struct isis_lsp *lsp;
 	frr_each(lspdb, head,lsp){ //this is like a for loop the first thing is the time of structure (i think), the second is the pointer to the structure and the third is a pointer in which puting the elem
-		printf("%hu\n",lsp->hdr.pdu_len);
+		json_object *hdr_json = json_hdr(lsp->hdr);
+		printf("%s\n",json_object_to_json_string(hdr_json));
 	}
 }
 

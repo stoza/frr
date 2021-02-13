@@ -26,6 +26,8 @@
 
 #include "lib/typesafe.h"
 #include "isisd/isis_pdu.h"
+//include to use json
+#include "json.h"
 
 PREDECL_RBTREE_UNIQ(lspdb)
 
@@ -155,5 +157,7 @@ void lsp_init(void);
 
 //fonction to load a lsdb file inside the current lsdb
 void lsp_db_load(struct lspdb_head *head, const char *filename);
+//fonction to format the hdr in json
+json_object *json_hdr(struct isis_lsp_hdr hdr);
 
 #endif /* ISIS_LSP */
