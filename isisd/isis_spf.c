@@ -64,6 +64,8 @@ DEFINE_MTYPE_STATIC(ISISD, ISIS_SPF_RUN, "ISIS SPF Run Info");
 DEFINE_MTYPE_STATIC(ISISD, ISIS_SPF_ADJ, "ISIS SPF Adjacency");
 DEFINE_MTYPE_STATIC(ISISD, ISIS_VERTEX_ADJ, "ISIS SPF Vertex Adjacency");
 
+extern int lsdb_dump;
+
 static void spf_adj_list_parse_lsp(struct isis_spftree *spftree,
 				   struct list *adj_list, struct isis_lsp *lsp,
 				   const uint8_t *pseudo_nodeid,
@@ -1775,6 +1777,19 @@ void isis_run_spf(struct isis_spftree *spftree)
 	spftree->last_run_duration =
 		((time_end.tv_sec - time_start.tv_sec) * 1000000)
 		+ (time_end.tv_usec - time_start.tv_usec);
+	
+	//use to dump the lsdb
+	if(lsdb_dump)
+		dump_lsdb_json(spftree->lspdb);
+}
+
+//function used to dump the lsdb in a json file
+//TODO write it in a json
+void dump_lsdb_json(struct lspdb_head *head){
+	struct isis_lsp *lsp;
+	frr_each(lspdb, head,lsp){ //this is like a for loop the first thing is the time of structure (i think), the second is the pointer to the structure and the third is a pointer in which puting the elem
+		printf("%hu\n",lsp->hdr.pdu_len);
+	}
 }
 
 static void isis_run_spf_with_protection(struct isis_area *area,
