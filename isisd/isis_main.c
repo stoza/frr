@@ -196,6 +196,11 @@ FRR_DAEMON_INFO(isisd, ISIS, .vty_port = ISISD_VTY_PORT,
 		.privs = &isisd_privs, .yang_modules = isisd_yang_modules,
 		.n_yang_modules = array_size(isisd_yang_modules), )
 
+
+//global variable to load/dump a lsdb file
+int file_load = 0;
+int lsdb_dump = 0;
+
 /*
  * Main routine of isisd. Parse arguments and handle IS-IS state machine.
  */
@@ -203,8 +208,6 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 	int instance = 1;
-	char *lsdb_file;
-	int file_load = 0;
 
 #ifdef FABRICD
 	frr_preinit(&fabricd_di, argc, argv);
@@ -212,9 +215,10 @@ int main(int argc, char **argv, char **envp)
 	frr_preinit(&isisd_di, argc, argv);
 #endif
 	frr_opt_add(
-		"I:L:", longopts,
+		"I:LD", longopts,
 		"  -I, --int_num      Set instance number (label-manager)\n"
-		"  -L, --lsdb_file    The lsdb file to load \n");
+		"  -L, --lsdb_file    The lsdb file to load (the file as to have the name lsdb.json\n"
+		"  -D, --dump_lsdb    USE to dump the lsdb in a json format\n");
 
 	/* Command line argument treatment. */
 	while (1) {
@@ -234,7 +238,9 @@ int main(int argc, char **argv, char **envp)
 			break;
 		case 'L':
 			file_load = 1;
-			lsdb_file = optarg;
+			break;
+		case 'D':
+			lsdb_dump = 1;
 			break;		
 		default:
 			frr_help_exit(1);
@@ -281,11 +287,6 @@ int main(int argc, char **argv, char **envp)
 	fabricd_init();
 
 	frr_config_fork();
-	//here put a if we give a filename as input => put a task on thread master to insert all in the db
-	if(file_load){
-		zlog_debug("LSDB file provided"); //TODO does not work
-		isis_load_lsdb(lsdb_file,master);
-	}
 	frr_run(master);
 
 	/* Not reached. */
