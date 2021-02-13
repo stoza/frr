@@ -1784,7 +1784,6 @@ void isis_run_spf(struct isis_spftree *spftree)
 }
 
 //fonction to format in a json the hdr of a lsp
-//TODO QUE FAIRE POUR LE LSP_ID???
 json_object *json_hdr(struct isis_lsp_hdr hdr){
 	json_object *hdr_json = json_object_new_object();
 	//getting all the values problème with lsp_id??
@@ -1793,12 +1792,18 @@ json_object *json_hdr(struct isis_lsp_hdr hdr){
 	json_object *seqno = json_object_new_int(hdr.seqno);
 	json_object *checksum = json_object_new_int(hdr.checksum);
 	json_object *lsp_bits = json_object_new_int(hdr.lsp_bits);
+	//get the id 
+	char dest[30];
+	lspid_print(hdr.lsp_id,dest,'\0','\0',NULL);
+	json_object *id = json_object_new_string(dest);
 
+	//putting all in the object
 	json_object_object_add(hdr_json,"pdu_len",pdu_len);
 	json_object_object_add(hdr_json,"rem_lifetime",rem_lifetime);
 	json_object_object_add(hdr_json,"seqno",seqno);
 	json_object_object_add(hdr_json,"checksum",checksum);
 	json_object_object_add(hdr_json,"lsp_bits",lsp_bits);
+	json_object_object_add(hdr_json,"lsp_id",id);
 
 	return hdr_json;
 }
