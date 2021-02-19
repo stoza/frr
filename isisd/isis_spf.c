@@ -1784,6 +1784,7 @@ void isis_run_spf(struct isis_spftree *spftree)
 }
 
 //fonction to format in a json the hdr of a lsp
+// the argument is the hdr structure.
 json_object *json_hdr(struct isis_lsp_hdr hdr){
 	json_object *hdr_json = json_object_new_object();
 	//getting all the values problème with lsp_id??
@@ -1793,9 +1794,10 @@ json_object *json_hdr(struct isis_lsp_hdr hdr){
 	json_object *checksum = json_object_new_int(hdr.checksum);
 	json_object *lsp_bits = json_object_new_int(hdr.lsp_bits);
 	//get the id 
-	char dest[30];
-	lspid_print(hdr.lsp_id,dest,'\0','\0',NULL);
-	json_object *id = json_object_new_string(dest);
+	json_object *id = json_object_new_array();
+	for(int i =0; i < ISIS_SYS_ID_LEN +2; i++){
+		json_object_array_add(id,json_object_new_int(hdr.lsp_id[i]));
+	}
 
 	//putting all in the object
 	json_object_object_add(hdr_json,"pdu_len",pdu_len);
@@ -1808,21 +1810,63 @@ json_object *json_hdr(struct isis_lsp_hdr hdr){
 	return hdr_json;
 }
 
+//TODO change all function to format tlvs in json in isis_tlvs.c
+/**
+* function to get the protocol supported
+*/
+json_object *json_protocols_supported(struct isis_protocols_supported *p){
+	if(!p || !p->count || !p->protocols)
+		return NULL;
+	json_object *p_array = json_object_new_array();
+	for(uint8_t i = 0; i < p->count; i++){
+		json_object *protocol = json_object_new_string(nlpid2str(p->protocols[i]));
+		json_object_array_add(p_array,protocol);
+	}
+	return p_array;
+}
+
+/**
+* function used to dump the tlvs
+*/
+json_object *json_tlvs(struct isis_tlvs *tlvs){
+	json_object *tlvs_json = json_object_new_object();
+
+	json_object_object_add(tlvs_json,"protocol_supported",json_protocols_supported(&tlvs->protocols_supported));
+	if(tlvs->hostname)
+		json_object_object_add(tlvs_json,"hostname",json_object_new_string(tlvs->hostname));
+	return tlvs_json;
+}
+
 //function used to dump the lsdb in a json file
 //TODO write it in a json
 void dump_lsdb_json(struct lspdb_head *head){
 	json_object *lspdb_json = json_object_new_array(); //create a new json_object	
 	struct isis_lsp *lsp;
-	frr_each(lspdb, head,lsp){ //this is like a for loop the first thing is the time of structure (i think), the second is the pointer to the structure and the third is a pointer in which puting the elem
+
+	//this is like a for loop the first thing is the time of structure (i think), the second is the pointer to the structure and the third is a pointer in which puting the elem
+	frr_each(lspdb, head,lsp){ 
 		json_object *lsp_json = json_object_new_object();
-		json_object *hdr_json = json_hdr(lsp->hdr);
 
 		//do the lsp json
+		json_object *hdr_json = json_hdr(lsp->hdr);
 		json_object_object_add(lsp_json,"hdr",hdr_json);
+
+		//do the tlvs
+		json_object_object_add(lsp_json,"tlv",json_tlvs(lsp->tlvs));
 
 		//add it to the global output
 		json_object_array_add(lspdb_json,lsp_json);
 	}
+
+	//write the json in file
+	FILE *file = fopen("lsdb_dump.json","w+"); //sur de mettre w+?
+	if(file == NULL){
+		fprintf(stderr,"Erreur ouverture du fichier: %s",strerror(errno));
+	}
+	else{
+		fprintf(file,"%s",json_object_to_json_string(lspdb_json));
+	}
+	fclose(file);
 	printf("%s\n",json_object_to_json_string(lspdb_json));
 }
 

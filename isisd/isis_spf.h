@@ -81,5 +81,8 @@ struct isis_spftree *isis_run_hopcount_spf(struct isis_area *area,
 					   struct isis_spftree *spftree);
 
 void isis_spf_timer_free(void *run);
+//dumb db
 void dump_lsdb_json(struct lspdb_head *head);
+json_object *json_protocols_supported(struct isis_protocols_supported *p);
+json_object *json_tlvs(struct isis_tlvs *tlvs);
 #endif /* _ZEBRA_ISIS_SPF_H */
