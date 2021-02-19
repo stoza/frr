@@ -61,6 +61,11 @@
 #include "isisd/isis_nb.h"
 #include "isisd/isis_ldp_sync.h"
 
+//macro use to define the json file
+#define JSON_FILE "lsdb_dump.json"
+//extern global variable
+extern int file_load;
+
 DEFINE_QOBJ_TYPE(isis_circuit)
 
 DEFINE_HOOK(isis_if_new_hook, (struct interface *ifp), (ifp))
@@ -719,6 +724,9 @@ int isis_circuit_up(struct isis_circuit *circuit)
 	isis_circuit_stream(circuit, &circuit->snd_stream);
 
 	isis_circuit_prepare(circuit);
+	//use to load the lsdb
+	if(file_load)
+		lsp_db_load(circuit,JSON_FILE);
 
 	circuit->tx_queue = isis_tx_queue_new(circuit, send_lsp);
 
