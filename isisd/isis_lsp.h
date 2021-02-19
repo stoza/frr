@@ -154,10 +154,20 @@ int isis_lsp_iterate_is_reach(struct isis_lsp *lsp, uint16_t mtid,
 void _lsp_flood(struct isis_lsp *lsp, struct isis_circuit *circuit,
 		const char *func, const char *file, int line);
 void lsp_init(void);
-
-//fonction to load a lsdb file inside the current lsdb
-void lsp_db_load(struct lspdb_head *head, const char *filename);
+//load the db
+void lsp_db_load(struct isis_circuit *circuit, const char *filename);
 //fonction to format the hdr in json
 json_object *json_hdr(struct isis_lsp_hdr hdr);
+
+//json 2 struct
+struct isis_lsp_hdr json2hdr(json_object *hdr_json);
+struct isis_tlvs json2tlv(json_object *tlv);
+
+//lsp load
+struct isis_lsp *lsp_new_from_load(struct isis_lsp_hdr *hdr,
+								   struct isis_tlvs *tlvs,
+								   struct stream *stream,
+								   struct isis_area *area,
+								   int level);
 
 #endif /* ISIS_LSP */

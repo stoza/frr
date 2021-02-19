@@ -60,10 +60,6 @@
 #include "isisd/isis_tx_queue.h"
 #include "isisd/isis_nb.h"
 
-//macro use to define the json file
-#define JSON_FILE "lsdb.json"
-//extern global variable
-extern int file_load;
 
 static int lsp_refresh(struct thread *thread);
 static int lsp_l1_refresh_pseudo(struct thread *thread);
@@ -84,9 +80,48 @@ int lspdb_compare(const struct isis_lsp *a, const struct isis_lsp *b)
 void lsp_db_init(struct lspdb_head *head)
 {
 	lspdb_init(head);
-	//use to load the file 
-	if(file_load)
-		lsp_db_load(head,JSON_FILE);
+}
+
+/**
+* function used to convert the hdr json format to an
+* actual isis_lsp_hdr structure
+*/
+struct isis_lsp_hdr json2hdr(json_object *hdr_json){
+	struct isis_lsp_hdr hdr = {};
+
+	json_object_object_foreach(hdr_json,key,value){
+		if(strcmp(key,"pdu_len") == 0)
+			hdr.pdu_len = (uint16_t) json_object_get_int(value);
+		if(strcmp(key,"rem_lifetime") == 0)
+			hdr.rem_lifetime = (uint16_t) json_object_get_int(value);
+		if(strcmp(key,"seqno") == 0)
+			hdr.seqno = (uint32_t) json_object_get_int(value);
+		if(strcmp(key,"checksum") == 0)
+			hdr.checksum = (uint16_t) json_object_get_int(value);
+		if(strcmp(key,"lsp_bits") == 0)
+			hdr.lsp_bits = (uint8_t) json_object_get_int(value);
+		if(strcmp(key,"lsp_id") == 0){
+			for(int i = 0 ; i < ISIS_SYS_ID_LEN + 2; i++){
+				hdr.lsp_id[i] = json_object_get_int(json_object_array_get_idx(value,i));
+			}
+		} 
+	}
+	return hdr;
+}
+
+/**
+* function used to convert the tlvs json format to an
+* actual isis_tlvs structure
+* //TODO write the logic
+*/
+struct isis_tlvs json2tlv(json_object *tlv_json){
+	struct isis_tlvs tlv = {};
+
+	json_object_object_foreach(tlv_json,key,value){
+		if(strcmp(key,"hostname") == 0)
+			tlv.hostname = json_object_get_string(value);
+	}
+	return tlv;
 }
 
 /**
@@ -94,10 +129,32 @@ void lsp_db_init(struct lspdb_head *head)
 * must be in a json format
 * // TODO DO THE LOGIC 
 */
-void lsp_db_load(struct lspdb_head *head, const char *filename){
-	printf("address of lsdb %p\n", head);
-	printf("string %s \n",filename);
+void lsp_db_load(struct isis_circuit *circuit, const char *filename){
+
+	json_object *file = json_object_from_file(filename);
+	int nb_lsp = json_object_array_length(file);	
+	struct isis_lsp_hdr hdr;
+	struct isis_tlvs tlv;
+
+	for(int i = 0 ; i < nb_lsp; i++){
+		json_object *lsp = json_object_array_get_idx(file,i);
+		json_object_object_foreach(lsp,key,value){
+			if(strcmp(key, "hdr") == 0){
+				hdr = json2hdr(value);
+			}
+			else if(strcmp(key, "tlv") == 0){
+				tlv = json2tlv(value);
+			}
+			else{
+				printf("ERROR KEY NOT RECOGNIZE : %s\n",key);
+			}
+		}
+		//do the new_lsp_from_recv here		
+		struct isis_lsp *new_lsp = lsp_new_from_recv(&hdr, &tlv, circuit->rcv_stream, NULL, circuit->area, 2); //change the 2
+		lsp_insert(circuit->area->lspdb,new_lsp);
+	}
 }
+
 
 void lsp_db_fini(struct lspdb_head *head)
 {
@@ -532,12 +589,16 @@ static void lsp_update_data(struct isis_lsp *lsp, struct isis_lsp_hdr *hdr,
 			    struct isis_area *area, int level)
 {
 	/* free the old lsp data */
-	lsp_clear_data(lsp);
+	lsp_clear_data(lsp); //free the tlvs of lsp
 
 	/* copying only the relevant part of our stream */
 	if (lsp->pdu != NULL)
 		stream_free(lsp->pdu);
-	lsp->pdu = stream_dup(stream);
+	if (stream->endp == 0){
+		lsp->pdu = NULL; //MAYBE?
+	} else {
+		lsp->pdu = stream_dup(stream);
+	}
 
 	memcpy(&lsp->hdr, hdr, sizeof(lsp->hdr));
 	lsp->area = area;
