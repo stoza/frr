@@ -1810,33 +1810,6 @@ json_object *json_hdr(struct isis_lsp_hdr hdr){
 	return hdr_json;
 }
 
-//TODO change all function to format tlvs in json in isis_tlvs.c
-/**
-* function to get the protocol supported
-*/
-json_object *json_protocols_supported(struct isis_protocols_supported *p){
-	if(!p || !p->count || !p->protocols)
-		return NULL;
-	json_object *p_array = json_object_new_array();
-	for(uint8_t i = 0; i < p->count; i++){
-		json_object *protocol = json_object_new_string(nlpid2str(p->protocols[i]));
-		json_object_array_add(p_array,protocol);
-	}
-	return p_array;
-}
-
-/**
-* function used to dump the tlvs
-*/
-json_object *json_tlvs(struct isis_tlvs *tlvs){
-	json_object *tlvs_json = json_object_new_object();
-
-	json_object_object_add(tlvs_json,"protocol_supported",json_protocols_supported(&tlvs->protocols_supported));
-	if(tlvs->hostname)
-		json_object_object_add(tlvs_json,"hostname",json_object_new_string(tlvs->hostname));
-	return tlvs_json;
-}
-
 //function used to dump the lsdb in a json file
 //TODO write it in a json
 void dump_lsdb_json(struct lspdb_head *head){
@@ -1858,6 +1831,7 @@ void dump_lsdb_json(struct lspdb_head *head){
 		json_object_array_add(lspdb_json,lsp_json);
 	}
 
+	printf("%s\n",json_object_to_json_string(lspdb_json));
 	//write the json in file
 	FILE *file = fopen("lsdb_dump.json","w+"); //sur de mettre w+?
 	if(file == NULL){
@@ -1867,7 +1841,6 @@ void dump_lsdb_json(struct lspdb_head *head){
 		fprintf(file,"%s",json_object_to_json_string(lspdb_json));
 	}
 	fclose(file);
-	printf("%s\n",json_object_to_json_string(lspdb_json));
 }
 
 static void isis_run_spf_with_protection(struct isis_area *area,
