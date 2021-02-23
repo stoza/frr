@@ -59,6 +59,7 @@ typedef int (*unpack_item_func)(uint16_t mtid, uint8_t len, struct stream *s,
 typedef void (*format_item_func)(uint16_t mtid, struct isis_item *i,
 				 struct sbuf *buf, int indent);
 typedef struct isis_item *(*copy_item_func)(struct isis_item *i);
+typedef json_object *(*format_json_item_func)(struct isis_item *i);
 
 struct tlv_ops {
 	const char *name;
@@ -69,6 +70,7 @@ struct tlv_ops {
 	unpack_item_func unpack_item;
 	format_item_func format_item;
 	copy_item_func copy_item;
+	format_json_item_func json_item;
 };
 
 enum how_to_pack {
@@ -824,6 +826,18 @@ static void format_item_prefix_sid(uint16_t mtid, struct isis_item *i,
 		  sid->flags & ISIS_PREFIX_SID_LOCAL ? " LOCAL" : "");
 }
 
+static json_object *format_json_item_prefix_sid(struct isis_item *i)
+{
+	struct isis_prefix_sid *sid = (struct isis_prefix_sid *)i;
+	json_object *result = json_object_new_object();
+
+	json_object_object_add(result,"flags",json_object_new_int(sid->flags));
+	json_object_object_add(result,"algorithm",json_object_new_int(sid->algorithm));
+	json_object_object_add(result,"value",json_object_new_int(sid->value));
+
+	return result;
+}
+
 static void free_item_prefix_sid(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_SUBTLV, i);
@@ -1000,7 +1014,10 @@ static void copy_items(enum isis_tlv_context context, enum isis_tlv_type type,
 static void format_items_(uint16_t mtid, enum isis_tlv_context context,
 			  enum isis_tlv_type type, struct isis_item_list *items,
 			  struct sbuf *buf, int indent);
+static json_object *format_json_items_(uint16_t mtid, enum isis_tlv_context context,
+						 enum isis_tlv_type type, struct isis_item_list *items);
 #define format_items(...) format_items_(ISIS_MT_IPV4_UNICAST, __VA_ARGS__)
+#define json_format_items(...) format_json_items_(ISIS_MT_IPV4_UNICAST, __VA_ARGS__)
 static void free_items(enum isis_tlv_context context, enum isis_tlv_type type,
 		       struct isis_item_list *items);
 static int pack_items_(uint16_t mtid, enum isis_tlv_context context,
@@ -1116,6 +1133,22 @@ static void format_item_area_address(uint16_t mtid, struct isis_item *i,
 		  isonet_print(addr->addr, addr->len));
 }
 
+static json_object *format_json_item_area_address(struct isis_item *i)
+{
+	struct isis_area_address *addr = (struct isis_area_address *) i;
+	json_object *result = json_object_new_object();
+	json_object *tab = json_object_new_array();
+
+	for(int i = 0; i < addr->len; i++){
+		json_object_array_add(tab,json_object_new_int(addr->addr[i]));
+	}
+
+	json_object_object_add(result, "addr", tab);
+	json_object_object_add(result, "len", json_object_new_int(addr->len));
+
+	return result;
+}
+
 static void free_item_area_address(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -1195,6 +1228,22 @@ static void format_item_oldstyle_reach(uint16_t mtid, struct isis_item *i,
 		  isis_format_id(r->id, 7), r->metric);
 }
 
+static json_object *format_json_item_oldstyle_reach(struct isis_item *i)
+{
+	struct isis_oldstyle_reach *r = (struct isis_oldstyle_reach *) i;
+	json_object *result = json_object_new_object();
+	json_object *tab = json_object_new_array();
+
+	for(int i = 0; i < 7; i++){
+		json_object_array_add(tab,json_object_new_int(r->id[i]));
+	}
+
+	json_object_object_add(result,"id",tab);
+	json_object_object_add(result,"metric",json_object_new_int(r->metric));
+
+	return result; 
+}
+
 static void free_item_oldstyle_reach(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -1264,6 +1313,19 @@ static void format_item_lan_neighbor(uint16_t mtid, struct isis_item *i,
 	sbuf_push(buf, indent, "LAN Neighbor: %s\n", isis_format_id(n->mac, 6));
 }
 
+static json_object *format_json_item_lan_neighbor(struct isis_item *i)
+{
+	struct isis_lan_neighbor *n = (struct isis_lan_neighbor *)i;
+	json_object *result = json_object_new_array();
+
+	for(int i = 0; i < 6; i++)
+	{
+		json_object_array_add(result,json_object_new_int(n->mac[i]));
+	} 
+
+	return result;
+}
+
 static void free_item_lan_neighbor(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -1327,6 +1389,25 @@ static void format_item_lsp_entry(uint16_t mtid, struct isis_item *i,
 		  "LSP Entry: %s, seq 0x%08x, cksum 0x%04hx, lifetime %hus\n",
 		  isis_format_id(e->id, 8), e->seqno, e->checksum,
 		  e->rem_lifetime);
+}
+
+static json_object *format_json_item_lsp_entry(struct isis_item *i)
+{
+	struct isis_lsp_entry *e = (struct isis_lsp_entry *)i;
+	json_object *result = json_object_new_object();
+	json_object *id = json_object_new_array();
+
+	for(int i = 0; i < 8; i++)
+	{
+		json_object_array_add(id,json_object_new_int(e->id[i]));
+	}
+
+	json_object_object_add(result,"id",id);
+	json_object_object_add(result, "rem_lifetime", json_object_new_int(e->rem_lifetime));
+	json_object_object_add(result, "checksum", json_object_new_int(e->checksum));
+	json_object_object_add(result, "seqno", json_object_new_int(e->seqno));
+	// TODOquid de la struct lsp??
+	return result;
 }
 
 static void free_item_lsp_entry(struct isis_item *i)
@@ -1404,6 +1485,23 @@ static void format_item_extended_reach(uint16_t mtid, struct isis_item *i,
 
 	if (r->subtlvs)
 		format_item_ext_subtlvs(r->subtlvs, buf, indent + 2, mtid);
+}
+
+static json_object *format_json_item_extended_reach(struct isis_item *i)
+{
+	struct isis_extended_reach *r = (struct isis_extended_reach *)i;
+	json_object *result = json_object_new_object();
+	json_object *id = json_object_new_array();
+
+	for(int i = 0; i < 7; i++)
+	{
+		json_object_array_add(id,json_object_new_int(r->id[i]));
+	}
+
+	json_object_object_add(result,"id",id);
+	json_object_object_add(result,"metric",json_object_new_int(r->metric));
+
+	return result;
 }
 
 static void free_item_extended_reach(struct isis_item *i)
@@ -1517,6 +1615,18 @@ static void format_item_oldstyle_ip_reach(uint16_t mtid, struct isis_item *i,
 		  r->metric);
 }
 
+static json_object *format_json_item_oldstyle_ip_reach(struct isis_item *i)
+{
+	struct isis_oldstyle_ip_reach *r = (struct isis_oldstyle_ip_reach *)i;
+	char prefixbuf[PREFIX2STR_BUFFER];
+	json_object *result = json_object_new_object();
+
+	prefix2str(&r->prefix, prefixbuf, sizeof(prefixbuf));
+	json_object_object_add(result,"prefix",json_object_new_string(prefixbuf));
+	json_object_object_add(result,"metric",json_object_new_int(r->metric));
+	return result;
+}
+
 static void free_item_oldstyle_ip_reach(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -1603,6 +1713,21 @@ static void format_tlv_protocols_supported(struct isis_protocols_supported *p,
 	sbuf_push(buf, 0, "\n");
 }
 
+/**
+* function to get the protocol supported
+*/
+json_object *json_protocols_supported(struct isis_protocols_supported *p)
+{
+	if(!p || !p->count || !p->protocols)
+		return NULL;
+	json_object *p_array = json_object_new_array();
+	for(uint8_t i = 0; i < p->count; i++){
+		json_object *protocol = json_object_new_string(nlpid2str(p->protocols[i]));
+		json_object_array_add(p_array,protocol);
+	}
+	return p_array;
+}
+
 static void free_tlv_protocols_supported(struct isis_protocols_supported *p)
 {
 	XFREE(MTYPE_ISIS_TLV, p->protocols);
@@ -1672,6 +1797,19 @@ static void format_item_ipv4_address(uint16_t mtid, struct isis_item *i,
 	sbuf_push(buf, indent, "IPv4 Interface Address: %s\n", addrbuf);
 }
 
+//TODO chercher si il y a le reverse de inet_ntop??
+static json_object *format_json_item_ipv4_address(struct isis_item *i)
+{
+	struct isis_ipv4_address *a = (struct isis_ipv4_address *)i;
+	char addrbuf[INET_ADDRSTRLEN];
+	json_object *result = json_object_new_object();
+
+	inet_ntop(AF_INET, &a->addr, addrbuf, sizeof(addrbuf));
+	json_object_object_add(result,"addr",json_object_new_string(addrbuf));
+
+	return result;
+}
+
 static void free_item_ipv4_address(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -1731,6 +1869,18 @@ static void format_item_ipv6_address(uint16_t mtid, struct isis_item *i,
 
 	inet_ntop(AF_INET6, &a->addr, addrbuf, sizeof(addrbuf));
 	sbuf_push(buf, indent, "IPv6 Interface Address: %s\n", addrbuf);
+}
+
+//pas sur qu il y a une translate dans l autre sens pour l ipv6
+static json_object *format_json_item_ipv6_address(struct isis_item *i)
+{
+	struct isis_ipv6_address *a = (struct isis_ipv6_address *)i;
+	char addrbuf[INET6_ADDRSTRLEN];
+	json_object *result = json_object_new_object();
+
+	inet_ntop(AF_INET6, &a->addr, addrbuf, sizeof(addrbuf));
+	json_object_object_add(result,"addr",json_object_new_string(addrbuf));
+	return result;
 }
 
 static void free_item_ipv6_address(struct isis_item *i)
@@ -1795,6 +1945,18 @@ static void format_item_mt_router_info(uint16_t mtid, struct isis_item *i,
 		  isis_mtid2str(info->mtid),
 		  info->overload ? " Overload" : "",
 		  info->attached ? " Attached" : "");
+}
+
+static json_object *format_json_item_mt_router_info(struct isis_item *i)
+{
+	struct isis_mt_router_info *info = (struct isis_mt_router_info *)i;
+	json_object *result = json_object_new_object();
+
+	json_object_object_add(result,"overload",json_object_new_boolean(info->overload));
+	json_object_object_add(result,"attached",json_object_new_boolean(info->attached));
+	json_object_object_add(result,"mtid",json_object_new_int(info->mtid));	
+
+	return result;
 }
 
 static void free_item_mt_router_info(struct isis_item *i)
@@ -1952,6 +2114,22 @@ static void format_item_extended_ip_reach(uint16_t mtid, struct isis_item *i,
 		sbuf_push(buf, indent, "  Subtlvs:\n");
 		format_subtlvs(r->subtlvs, buf, indent + 4);
 	}
+}
+
+//TODO voir ce ipv4 prefix il exist un str2prefix apparement
+static json_object *format_json_item_extended_ip_reach(struct isis_item *i)
+{
+	struct isis_extended_ip_reach *r = (struct isis_extended_ip_reach *)i;
+	char prefixbuf[PREFIX2STR_BUFFER];
+	json_object *result = json_object_new_object();
+
+	json_object_object_add(result,"metric",json_object_new_int(r->metric));
+	json_object_object_add(result,"down",json_object_new_boolean(r->down));
+	//get the address
+	prefix2str(&r->prefix,prefixbuf,sizeof(prefixbuf));
+	json_object_object_add(result,"prefix",json_object_new_string(prefixbuf));
+	//que faire de la struct sub tlv? (voir au dessus);
+	return result;
 }
 
 static void free_item_extended_ip_reach(struct isis_item *i)
@@ -2436,6 +2614,22 @@ static void format_item_ipv6_reach(uint16_t mtid, struct isis_item *i,
 	}
 }
 
+//TODO voir cette connerie d ip. 
+static json_object *format_json_item_ipv6_reach(struct isis_item *i)
+{
+	struct isis_ipv6_reach *r = (struct isis_ipv6_reach *)i;
+	char prefixbuf[PREFIX2STR_BUFFER];
+	json_object *result = json_object_new_object();
+
+	prefix2str(&r->prefix, prefixbuf, sizeof(prefixbuf));
+	json_object_object_add(result,"prefix",json_object_new_string(prefixbuf));
+	json_object_object_add(result,"metric",json_object_new_int(r->metric));
+	json_object_object_add(result,"down",json_object_new_boolean(r->down));
+	json_object_object_add(result,"down",json_object_new_boolean(r->external));
+
+	return result;
+}
+
 static void free_item_ipv6_reach(struct isis_item *i)
 {
 	struct isis_ipv6_reach *item = (struct isis_ipv6_reach *)i;
@@ -2904,6 +3098,14 @@ static void format_item_auth(uint16_t mtid, struct isis_item *i,
 	}
 }
 
+static json_object *format_json_item_auth(struct isis_item *i)
+{
+	struct isis_auth *auth = (struct isis_auth *) i;
+	json_object *result = json_object_new_object();
+
+	return result;
+}
+
 static void free_item_auth(struct isis_item *i)
 {
 	XFREE(MTYPE_ISIS_TLV, i);
@@ -3125,6 +3327,17 @@ static void format_item(uint16_t mtid, enum isis_tlv_context context,
 	assert(!"Unknown item tlv type!");
 }
 
+static json_object *format_json_item(uint16_t mtid, enum isis_tlv_context context,
+						 enum isis_tlv_type type, struct isis_item *i)
+{
+	const struct tlv_ops *ops = tlv_table[context][type];
+
+	if(ops && ops->json_item) {
+		return ops->json_item(i);
+	}
+	return NULL;
+}
+
 static void format_items_(uint16_t mtid, enum isis_tlv_context context,
 			  enum isis_tlv_type type, struct isis_item_list *items,
 			  struct sbuf *buf, int indent)
@@ -3133,6 +3346,22 @@ static void format_items_(uint16_t mtid, enum isis_tlv_context context,
 
 	for (i = items->head; i; i = i->next)
 		format_item(mtid, context, type, i, buf, indent);
+}
+
+static json_object *format_json_items_(uint16_t mtid, enum isis_tlv_context context,
+						 enum isis_tlv_type type, struct isis_item_list *items)
+{
+	struct isis_item *i;
+	json_object *result = json_object_new_array();
+
+	for(i = items->head; i; i = i->next)
+	{
+		json_object *intermediate = format_json_item(mtid,context,type,i);
+		if(intermediate)
+			json_object_array_add(result,intermediate);
+	}
+	
+	return result;
 }
 
 static void free_item(enum isis_tlv_context tlv_context,
@@ -3669,6 +3898,24 @@ static void format_tlvs(struct isis_tlvs *tlvs, struct sbuf *buf, int indent)
 	format_tlv_spine_leaf(tlvs->spine_leaf, buf, indent);
 }
 
+/**
+* function used to dump the tlvs
+*/
+json_object *json_tlvs(struct isis_tlvs *tlvs)
+{
+	json_object *tlvs_json = json_object_new_object();
+
+	json_object_object_add(tlvs_json,"protocol_supported",json_protocols_supported(&tlvs->protocols_supported));
+	if(tlvs->hostname) //dont know exactly why but sometimes hostname = nil
+		json_object_object_add(tlvs_json,"hostname",json_object_new_string(tlvs->hostname));
+	json_object *ipv4_address = json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_IPV4_ADDRESS,&tlvs->ipv4_address);
+	json_object_object_add(tlvs_json,"ipv4_address",ipv4_address);
+	json_object_object_add(tlvs_json,"extended_ip_reach",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_EXTENDED_IP_REACH,&tlvs->extended_ip_reach));
+	json_object_object_add(tlvs_json,"area_addresses",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_AREA_ADDRESSES,&tlvs->area_addresses));
+	
+	return tlvs_json;
+}
+
 const char *isis_format_tlvs(struct isis_tlvs *tlvs)
 {
 	static struct sbuf buf;
@@ -4113,7 +4360,8 @@ int isis_unpack_tlvs(size_t avail_len, struct stream *stream,
 		.free_item = free_item_##_name_,                               \
 		.unpack_item = unpack_item_##_name_,                           \
 		.format_item = format_item_##_name_,                           \
-		.copy_item = copy_item_##_name_}
+		.copy_item = copy_item_##_name_,								\
+		.json_item = format_json_item_##_name_} 								
 
 #define SUBTLV_OPS(_name_, _desc_)                                             \
 	static const struct tlv_ops subtlv_##_name_##_ops = {                  \
@@ -4123,27 +4371,27 @@ int isis_unpack_tlvs(size_t avail_len, struct stream *stream,
 #define ITEM_SUBTLV_OPS(_name_, _desc_) \
 	ITEM_TLV_OPS(_name_, _desc_)
 
-ITEM_TLV_OPS(area_address, "TLV 1 Area Addresses");
-ITEM_TLV_OPS(oldstyle_reach, "TLV 2 IS Reachability");
-ITEM_TLV_OPS(lan_neighbor, "TLV 6 LAN Neighbors");
-ITEM_TLV_OPS(lsp_entry, "TLV 9 LSP Entries");
+ITEM_TLV_OPS(area_address, "TLV 1 Area Addresses"); //V
+ITEM_TLV_OPS(oldstyle_reach, "TLV 2 IS Reachability"); //V
+ITEM_TLV_OPS(lan_neighbor, "TLV 6 LAN Neighbors"); //V
+ITEM_TLV_OPS(lsp_entry, "TLV 9 LSP Entries"); //V
 ITEM_TLV_OPS(auth, "TLV 10 IS-IS Auth");
 TLV_OPS(purge_originator, "TLV 13 Purge Originator Identification");
-ITEM_TLV_OPS(extended_reach, "TLV 22 Extended Reachability");
-ITEM_TLV_OPS(oldstyle_ip_reach, "TLV 128/130 IP Reachability");
+ITEM_TLV_OPS(extended_reach, "TLV 22 Extended Reachability"); //V
+ITEM_TLV_OPS(oldstyle_ip_reach, "TLV 128/130 IP Reachability"); //+-V
 TLV_OPS(protocols_supported, "TLV 129 Protocols Supported");
-ITEM_TLV_OPS(ipv4_address, "TLV 132 IPv4 Interface Address");
+ITEM_TLV_OPS(ipv4_address, "TLV 132 IPv4 Interface Address"); //+-V
 TLV_OPS(te_router_id, "TLV 134 TE Router ID");
-ITEM_TLV_OPS(extended_ip_reach, "TLV 135 Extended IP Reachability");
+ITEM_TLV_OPS(extended_ip_reach, "TLV 135 Extended IP Reachability"); //+-V
 TLV_OPS(dynamic_hostname, "TLV 137 Dynamic Hostname");
 TLV_OPS(spine_leaf, "TLV 150 Spine Leaf Extensions");
-ITEM_TLV_OPS(mt_router_info, "TLV 229 MT Router Information");
+ITEM_TLV_OPS(mt_router_info, "TLV 229 MT Router Information"); //V
 TLV_OPS(threeway_adj, "TLV 240 P2P Three-Way Adjacency");
-ITEM_TLV_OPS(ipv6_address, "TLV 232 IPv6 Interface Address");
+ITEM_TLV_OPS(ipv6_address, "TLV 232 IPv6 Interface Address"); //+-V
 ITEM_TLV_OPS(ipv6_reach, "TLV 236 IPv6 Reachability");
 TLV_OPS(router_cap, "TLV 242 Router Capability");
 
-ITEM_SUBTLV_OPS(prefix_sid, "Sub-TLV 3 SR Prefix-SID");
+ITEM_SUBTLV_OPS(prefix_sid, "Sub-TLV 3 SR Prefix-SID"); //
 SUBTLV_OPS(ipv6_source_prefix, "Sub-TLV 22 IPv6 Source Prefix");
 
 static const struct tlv_ops *const tlv_table[ISIS_CONTEXT_MAX][ISIS_TLV_MAX] = {
