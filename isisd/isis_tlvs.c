@@ -1720,12 +1720,16 @@ json_object *json_protocols_supported(struct isis_protocols_supported *p)
 {
 	if(!p || !p->count || !p->protocols)
 		return NULL;
+	json_object *result = json_object_new_object();
+
 	json_object *p_array = json_object_new_array();
 	for(uint8_t i = 0; i < p->count; i++){
-		json_object *protocol = json_object_new_string(nlpid2str(p->protocols[i]));
+		json_object *protocol = json_object_new_int(p->protocols[i]);
 		json_object_array_add(p_array,protocol);
 	}
-	return p_array;
+	json_object_object_add(result,"count",json_object_new_int(p->count));
+	json_object_object_add(result,"protocols",p_array);
+	return result;
 }
 
 static void free_tlv_protocols_supported(struct isis_protocols_supported *p)
@@ -2032,6 +2036,15 @@ static void format_tlv_te_router_id(const struct in_addr *id, struct sbuf *buf,
 	char addrbuf[INET_ADDRSTRLEN];
 	inet_ntop(AF_INET, id, addrbuf, sizeof(addrbuf));
 	sbuf_push(buf, indent, "TE Router ID: %s\n", addrbuf);
+}
+
+json_object *format_json_te_router_id(const struct in_addr *id)
+{
+	if(!id)
+		return NULL;
+	char addrbuf[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, id, addrbuf, sizeof(addrbuf));
+	return json_object_new_string(addrbuf);
 }
 
 static void free_tlv_te_router_id(struct in_addr *id)
@@ -2827,6 +2840,20 @@ static void format_tlv_router_cap(const struct isis_router_cap *router_cap,
 			  router_cap->msd);
 }
 
+json_object *format_json_router_cap(struct isis_router_cap *cap)
+{
+	char addrbuf[INET_ADDRSTRLEN];
+	if(!cap)
+		return NULL;
+	
+	json_object *router_cap = json_object_new_object();
+	inet_ntop(AF_INET, &cap->router_id, addrbuf, sizeof(addrbuf));
+	json_object_object_add(router_cap, "router_id", json_object_new_string(addrbuf));
+	json_object_object_add(router_cap, "flags", json_object_new_int(cap->flags));
+
+	return router_cap;
+}
+
 static void free_tlv_router_cap(struct isis_router_cap *router_cap)
 {
 	XFREE(MTYPE_ISIS_TLV, router_cap);
@@ -3356,6 +3383,7 @@ static json_object *format_json_items_(uint16_t mtid, enum isis_tlv_context cont
 
 	for(i = items->head; i; i = i->next)
 	{
+		//TODO see if we can not put the thing if empty.
 		json_object *intermediate = format_json_item(mtid,context,type,i);
 		if(intermediate)
 			json_object_array_add(result,intermediate);
@@ -3912,6 +3940,8 @@ json_object *json_tlvs(struct isis_tlvs *tlvs)
 	json_object_object_add(tlvs_json,"ipv4_address",ipv4_address);
 	json_object_object_add(tlvs_json,"extended_ip_reach",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_EXTENDED_IP_REACH,&tlvs->extended_ip_reach));
 	json_object_object_add(tlvs_json,"area_addresses",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_AREA_ADDRESSES,&tlvs->area_addresses));
+	json_object_object_add(tlvs_json, "TE_router_id", format_json_te_router_id(tlvs->te_router_id));
+	json_object_object_add(tlvs_json, "router_cap", format_json_router_cap(tlvs->router_cap));
 	
 	return tlvs_json;
 }
