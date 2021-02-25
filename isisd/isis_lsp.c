@@ -110,18 +110,164 @@ struct isis_lsp_hdr json2hdr(json_object *hdr_json){
 }
 
 /**
+* this function translate the json_protocol supported to a tlv
+*/
+void json_protocol_supported_2_tlv(struct isis_tlvs *tlv, json_object *protocol_supported)
+{
+	//attention apparement je peux avoir des protocol supported == NULL??
+	if(protocol_supported == NULL)
+		return;
+
+	struct nlpids nlpids = {};
+	json_object_object_foreach(protocol_supported, key, value){
+		if(strcmp(key,"count") == 0)
+			nlpids.count = json_object_get_int(value);
+		if(strcmp(key,"protocols") == 0){			
+			int nb_protocols_supported = json_object_array_length(value);
+			for(int i = 0; i < nb_protocols_supported; i++){
+				json_object *nplid = json_object_array_get_idx(value,i);
+				nlpids.nlpids[i] = json_object_get_int(nplid);
+			}
+		}
+	}
+	isis_tlvs_set_protocols_supported(tlv,&nlpids);
+}
+
+/**
+* this function set the extended ip reach from a json
+*/
+//void json_extended_ip_reach_2_tlv(struct isis_tlvs *tlv, json_object *extended_ip_reach)
+//{
+//}
+
+/**
+* function used to convert the area addresses
+* //TODO does not work for un unknow reason
+*/
+void json_area_addresses_2_tlv(struct isis_tlvs *tlv, json_object *area_addresses)
+{
+	struct list *list_addr = list_new();
+
+	int number_addr = json_object_array_length(area_addresses);
+	for(int j = 0; j < number_addr; j++){
+		struct isis_area_address area_addr = {};
+		json_object *val = json_object_array_get_idx(area_addresses,j);
+		json_object_object_foreach(val, key, value){
+			if(strcmp(key, "len") == 0 )
+				area_addr.len = json_object_get_int(value);
+			if(strcmp(key, "addr") == 0 ){
+				int length = json_object_array_length(value);
+				for(int i = 0; i < length; i++){
+					json_object *index = json_object_array_get_idx(value, i);
+					area_addr.addr[i] = json_object_get_int(index);
+				}
+			}
+		}
+		listnode_add(list_addr,&area_addr);
+		isis_tlvs_add_area_addresses(tlv,list_addr); 
+	}	
+}
+
+/**
+* function used to do the ipv4 to a tlv
+*/
+void json_ipv4_address_2_tlv(struct isis_tlvs *tlv, json_object *value)
+{
+	struct in_addr addr = {}; //can do a malloc for that
+
+	int number_ipv4 = json_object_array_length(value);
+	for(int i = 0; i < number_ipv4; i++){
+		json_object *ip = json_object_array_get_idx(value, i);
+		json_object_object_foreach(ip, key, value){
+			if(strcmp(key, "addr") == 0){
+				const char *string_ip = json_object_get_string(value);
+				inet_pton(AF_INET, string_ip, &addr);
+			}
+		}
+		isis_tlvs_add_ipv4_address(tlv, &addr);
+	}
+}
+
+void json_extended_ip_reach_2_tlv(struct isis_tlvs *tlv, json_object *value)
+{
+	int nb_extended_ip = json_object_array_length(value);
+	for(int i = 0; i < nb_extended_ip; i++)
+	{
+		struct prefix_ipv4 *ipv4 = prefix_ipv4_new();
+		uint32_t metric = 0;
+
+		json_object *extended_ip = json_object_array_get_idx(value, i);
+		json_object_object_foreach(extended_ip, key, value)
+		{
+			if(strcmp(key, "metric") == 0)
+				metric = json_object_get_int(value);
+			if(strcmp(key, "prefix") == 0){
+				const char *prefix_ipv4 = json_object_get_string(value);
+				str2prefix_ipv4(prefix_ipv4, ipv4); //TODO check return?
+			}
+		}
+		isis_tlvs_add_extended_ip_reach(tlv, ipv4, metric, false, NULL); //TODO check this external value
+	}
+}
+
+/**
+* function to dump the te router id
+*/
+void json_te_router_id_2_tlv(struct isis_tlvs *tlv, json_object *value)
+{
+	if(value == NULL)
+		return;
+
+	struct in_addr addr = {};
+
+	const char *id = json_object_get_string(value);
+	inet_pton(AF_INET, id, &addr);
+	isis_tlvs_set_te_router_id(tlv, &addr);
+}
+
+void json_router_cap_2_tlv(struct isis_tlvs *tlv, json_object *router_cap_json)
+{
+	if(router_cap_json == NULL)
+		return;
+
+	struct isis_router_cap cap = {};
+	struct in_addr addr = {}; 
+	json_object_object_foreach(router_cap_json, key, value)
+	{
+		if(strcmp(key, "router_id") == 0){
+			const char *router_id = json_object_get_string(value);
+			inet_pton(AF_INET, router_id, &addr);
+			cap.router_id = addr;
+		}
+		if(strcmp(key, "flags") == 0)
+			cap.flags = json_object_get_int(value);
+	}
+	isis_tlvs_set_router_capability(tlv,&cap);	
+}
+
+/**
 * function used to convert the tlvs json format to an
 * actual isis_tlvs structure
 * //TODO write the logic
 */
-struct isis_tlvs json2tlv(json_object *tlv_json){
-	struct isis_tlvs tlv = {};
+void json2tlv(struct isis_tlvs *tlv, json_object *tlv_json){
 
 	json_object_object_foreach(tlv_json,key,value){
-		if(strcmp(key,"hostname") == 0)
-			tlv.hostname = json_object_get_string(value);
+		if(strcmp(key, "hostname") == 0)
+			tlv->hostname = json_object_get_string(value);
+		if(strcmp(key, "protocol_supported") == 0)
+			json_protocol_supported_2_tlv(tlv, value);
+		if(strcmp(key, "extended_ip_reach") == 0)
+			json_extended_ip_reach_2_tlv(tlv, value);
+		if(strcmp(key, "area_addresses") == 0 )
+			json_area_addresses_2_tlv(tlv,value);
+		if(strcmp(key, "ipv4_address") == 0 )
+			json_ipv4_address_2_tlv(tlv,value);
+		if(strcmp(key, "TE_router_id") == 0)
+			json_te_router_id_2_tlv(tlv,value);
+		if(strcmp(key, "router_cap") == 0)
+			json_router_cap_2_tlv(tlv,value);
 	}
-	return tlv;
 }
 
 /**
@@ -134,23 +280,24 @@ void lsp_db_load(struct isis_circuit *circuit, const char *filename){
 	json_object *file = json_object_from_file(filename);
 	int nb_lsp = json_object_array_length(file);	
 	struct isis_lsp_hdr hdr;
-	struct isis_tlvs tlv;
+	struct isis_tlvs *tlv;
 
 	for(int i = 0 ; i < nb_lsp; i++){
+		tlv = isis_alloc_tlvs();
 		json_object *lsp = json_object_array_get_idx(file,i);
-		json_object_object_foreach(lsp,key,value){
+		json_object_object_foreach(lsp, key, value){
 			if(strcmp(key, "hdr") == 0){
 				hdr = json2hdr(value);
 			}
 			else if(strcmp(key, "tlv") == 0){
-				tlv = json2tlv(value);
+				json2tlv(tlv,value);
 			}
 			else{
 				printf("ERROR KEY NOT RECOGNIZE : %s\n",key);
 			}
 		}
 		//do the new_lsp_from_recv here		
-		struct isis_lsp *new_lsp = lsp_new_from_recv(&hdr, &tlv, circuit->rcv_stream, NULL, circuit->area, 2); //change the 2
+		struct isis_lsp *new_lsp = lsp_new_from_recv(&hdr, tlv, circuit->rcv_stream, NULL, circuit->area, 2); //change the 2
 		lsp_insert(circuit->area->lspdb,new_lsp);
 	}
 }
