@@ -245,6 +245,27 @@ void json_router_cap_2_tlv(struct isis_tlvs *tlv, json_object *router_cap_json)
 	isis_tlvs_set_router_capability(tlv,&cap);	
 }
 
+void json_extended_reachability_2_tlv(struct isis_tlvs *tlv, json_object *reachability)
+{
+	int length = json_object_array_length(reachability);
+	uint32_t metric = 0;
+	uint8_t id[7];
+
+	for(int i = 0; i < length; i++)
+	{
+		json_object *current = json_object_array_get_idx(reachability, i);
+		json_object_object_foreach(current, key, value){
+			if(strcmp(key, "metric") == 0)
+				metric = json_object_get_int(value);
+			if(strcmp(key, "id") == 0){
+				for(int j = 0; j < 7; j++)
+					id[j] = json_object_get_int(json_object_array_get_idx(value, j));
+			}
+		}
+		isis_tlvs_add_extended_reach(tlv, ISIS_MT_IPV4_UNICAST, id, metric, NULL);
+	}
+}
+
 /**
 * function used to convert the tlvs json format to an
 * actual isis_tlvs structure
@@ -254,7 +275,7 @@ void json2tlv(struct isis_tlvs *tlv, json_object *tlv_json){
 
 	json_object_object_foreach(tlv_json,key,value){
 		if(strcmp(key, "hostname") == 0)
-			tlv->hostname = json_object_get_string(value);
+			isis_tlvs_set_dynamic_hostname(tlv, json_object_get_string(value));
 		if(strcmp(key, "protocol_supported") == 0)
 			json_protocol_supported_2_tlv(tlv, value);
 		if(strcmp(key, "extended_ip_reach") == 0)
@@ -267,6 +288,8 @@ void json2tlv(struct isis_tlvs *tlv, json_object *tlv_json){
 			json_te_router_id_2_tlv(tlv,value);
 		if(strcmp(key, "router_cap") == 0)
 			json_router_cap_2_tlv(tlv,value);
+		if(strcmp(key, "extended_reachability") == 0)
+			json_extended_reachability_2_tlv(tlv, value);
 	}
 }
 
@@ -297,8 +320,10 @@ void lsp_db_load(struct isis_circuit *circuit, const char *filename){
 			}
 		}
 		//do the new_lsp_from_recv here		
-		struct isis_lsp *new_lsp = lsp_new_from_recv(&hdr, tlv, circuit->rcv_stream, NULL, circuit->area, 2); //change the 2
-		lsp_insert(circuit->area->lspdb,new_lsp);
+		struct isis_lsp *new_lsp = lsp_new_from_recv(&hdr, tlv, circuit->rcv_stream, NULL, circuit->area, IS_LEVEL_1);
+		isis_tlvs_add_area_addresses(new_lsp->tlvs,circuit->area->area_addrs);
+		lsp_pack_pdu(new_lsp);
+		lsp_insert(circuit->area->lspdb,new_lsp); //faire un circuit_area_lspdb[1] //pour insert comme il faut dans l2
 	}
 }
 
@@ -516,7 +541,7 @@ static void lsp_add_auth(struct isis_lsp *lsp)
 	isis_tlvs_add_auth(lsp->tlvs, passwd);
 }
 
-static void lsp_pack_pdu(struct isis_lsp *lsp)
+void lsp_pack_pdu(struct isis_lsp *lsp)
 {
 	if (!lsp->tlvs)
 		lsp->tlvs = isis_alloc_tlvs();
@@ -741,9 +766,9 @@ static void lsp_update_data(struct isis_lsp *lsp, struct isis_lsp_hdr *hdr,
 	/* copying only the relevant part of our stream */
 	if (lsp->pdu != NULL)
 		stream_free(lsp->pdu);
-	if (stream->endp == 0){
-		lsp->pdu = NULL; //MAYBE?
-	} else {
+	if (stream->endp == 0)
+		lsp->pdu = stream_new(LLC_LEN + area->lsp_mtu); //do a new stream on s en fout
+	else {
 		lsp->pdu = stream_dup(stream);
 	}
 

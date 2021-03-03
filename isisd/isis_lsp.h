@@ -155,13 +155,20 @@ void _lsp_flood(struct isis_lsp *lsp, struct isis_circuit *circuit,
 		const char *func, const char *file, int line);
 void lsp_init(void);
 //load the db
+void lsp_pack_pdu(struct isis_lsp *lsp);
 void lsp_db_load(struct isis_circuit *circuit, const char *filename);
 //fonction to format the hdr in json
 json_object *json_hdr(struct isis_lsp_hdr hdr);
 
 //json 2 struct
 struct isis_lsp_hdr json2hdr(json_object *hdr_json);
-struct isis_tlvs json2tlv(json_object *tlv);
+void json2tlv(struct isis_tlvs *tlv, json_object *tlv_json);
+void json_protocol_supported_2_tlv(struct isis_tlvs *tlv, json_object* value);
+void json_area_addresses_2_tlv(struct isis_tlvs *tlv, json_object *area_addresses);
+void json_extended_ip_reach_2_tlv(struct isis_tlvs *tlv, json_object *extended_ip_reach);
+void json_ipv4_address_2_tlv(struct isis_tlvs *tlv, json_object *value);
+void json_te_router_id_2_tlv(struct isis_tlvs *tlv, json_object *value);
+void json_router_cap_2_tlv(struct isis_tlvs *tlv, json_object *router_cap);
 
 //lsp load
 struct isis_lsp *lsp_new_from_load(struct isis_lsp_hdr *hdr,
