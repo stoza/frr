@@ -646,5 +646,6 @@ json_object *json_tlvs(struct isis_tlvs *tlvs);
 json_object *json_protocols_supported(struct isis_protocols_supported *p);
 json_object *format_json_te_router_id(const struct in_addr *id);
 json_object *format_json_router_cap(struct isis_router_cap *cap);
+void json_extended_reachability_2_tlv(struct isis_tlvs *tlv, json_object *reachability);
 
 #endif

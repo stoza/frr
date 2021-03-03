@@ -3940,6 +3940,7 @@ json_object *json_tlvs(struct isis_tlvs *tlvs)
 	json_object_object_add(tlvs_json,"ipv4_address",ipv4_address);
 	json_object_object_add(tlvs_json,"extended_ip_reach",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_EXTENDED_IP_REACH,&tlvs->extended_ip_reach));
 	json_object_object_add(tlvs_json,"area_addresses",json_format_items(ISIS_CONTEXT_LSP,ISIS_TLV_AREA_ADDRESSES,&tlvs->area_addresses));
+	json_object_object_add(tlvs_json, "extended_reachability", json_format_items(ISIS_CONTEXT_LSP, ISIS_TLV_EXTENDED_REACH, &tlvs->extended_reach));
 	json_object_object_add(tlvs_json, "TE_router_id", format_json_te_router_id(tlvs->te_router_id));
 	json_object_object_add(tlvs_json, "router_cap", format_json_router_cap(tlvs->router_cap));
 	
