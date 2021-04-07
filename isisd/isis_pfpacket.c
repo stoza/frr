@@ -416,7 +416,7 @@ int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_ls
 			return ISIS_WARNING;
 		}
 		/* then we lose the LLC */
-		stream_write(circuit->rcv_stream, temp_buff + LLC_LEN, bytesread - LLC_LEN);
+		stream_write(circuit->rcv_stream, temp_buff  ,bytesread );
 		memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
 
 		return ISIS_OK;
@@ -571,7 +571,8 @@ int isis_send_pdu_bcast(struct isis_circuit *circuit, int level, bool is_lsp)
 
 	//TODO not sure only lsp in the buffer
 	if(is_lsp){
-		if (sendmsg(circuit->tcp_fd, &msg, 0) < 0) {
+		zlog_debug("send buffer length %lu", stream_get_endp(circuit->snd_stream));
+		if (send(circuit->tcp_fd, circuit->snd_stream->data, stream_get_endp (circuit->snd_stream), 0) < 0) {
 			zlog_warn("IS-IS pfpacket: could not transmit packet on TCP socket %s: %s",
 			  circuit->interface->name, safe_strerror(errno));
 			if (ERRNO_IO_RETRY(errno))
