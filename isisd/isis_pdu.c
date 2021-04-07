@@ -91,7 +91,7 @@ static int ack_lsp(struct isis_lsp_hdr *hdr, struct isis_circuit *circuit,
 	stream_putw_at(circuit->snd_stream, lenp, length);
 
 	pdu_counter_count(circuit->area->pdu_tx_counters, pdu_type);
-	retval = circuit->tx(circuit, level);
+	retval = circuit->tx(circuit, level, true); //TODO peut etre mettre 1
 	if (retval != ISIS_OK)
 		flog_err(EC_ISIS_PACKET,
 			 "ISIS-Upd (%s): Send L%d LSP PSNP on %s failed",
@@ -635,9 +635,9 @@ static int process_hello(uint8_t pdu_type, struct isis_circuit *circuit,
 		.circuit = circuit, .ssnpa = ssnpa, .level = level};
 
 	/* Generic IIH Header */
-	iih.circ_type = stream_getc(circuit->rcv_stream) & 0x03;
-	stream_get(iih.sys_id, circuit->rcv_stream, ISIS_SYS_ID_LEN);
-	iih.holdtime = stream_getw(circuit->rcv_stream);
+	iih.circ_type = stream_getc(circuit->rcv_stream) & 0x03; //because the first 6 bits are reserved
+	stream_get(iih.sys_id, circuit->rcv_stream, ISIS_SYS_ID_LEN); //getting the sys_id
+	iih.holdtime = stream_getw(circuit->rcv_stream); //w mean word (aka 16 bits)
 	iih.pdu_len = stream_getw(circuit->rcv_stream);
 
 	if (p2p_hello) {
@@ -684,6 +684,17 @@ static int process_hello(uint8_t pdu_type, struct isis_circuit *circuit,
 					    raw_pdu);
 #endif /* ifndef FABRICD */
 		goto out;
+	}
+
+	if (!iih.tlvs->tcp_port.port){
+		zlog_warn("No port in TLV in %s", pdu_name);
+	}
+	//zlog_debug("Port received : %u ", iih.tlvs->tcp_port.port);
+	//the server will be the one with the smallest port
+	if((!circuit->tcp_port || iih.tlvs->tcp_port.port < circuit->tcp_port) && iih.tlvs->tcp_port.port != 0 && !circuit->tcp_connected){
+		zlog_debug("WE WILL BE THE CLIENT\n");
+		circuit->tcp_port = iih.tlvs->tcp_port.port;
+		open_tcp_connection(&iih.tlvs->ipv4_address, circuit);
 	}
 
 	if (!iih.tlvs->area_addresses.count) {
@@ -1715,8 +1726,41 @@ int isis_handle_pdu(struct isis_circuit *circuit, uint8_t *ssnpa)
 		retval = process_snp(pdu_type, circuit, ssnpa);
 		break;
 	default:
+		zlog_debug("Unknow pdu type %u", pdu_type);
 		return ISIS_ERROR;
 	}
+
+	return retval;
+}
+
+/**
+** fonction used to thread the packet received over tcp
+*/ 
+int isis_tcp_receive(struct thread *thread)
+{
+	struct isis_circuit *circuit;
+	uint8_t ssnpa[ETH_ALEN];
+	int retval;
+
+	circuit = THREAD_ARG(thread);
+	assert(circuit);
+
+	circuit->t_read = NULL;
+	circuit->not_listening = true;
+
+	isis_circuit_stream(circuit, &circuit->rcv_stream);
+
+	retval = circuit->rx(circuit, ssnpa, true);
+
+#if ISIS_METHOD != ISIS_METHOD_BPF
+	if (retval == ISIS_OK)
+		retval = isis_handle_pdu(circuit, ssnpa);
+	else
+		zlog_debug("RETVAL NO ISIS_OK");
+#endif //ISIS_METHOD != ISIS_METHOD_BPF
+
+	if (!circuit->is_passive)
+		isis_circuit_prepare(circuit);
 
 	return retval;
 }
@@ -1737,7 +1781,7 @@ int isis_receive(struct thread *thread)
 
 	isis_circuit_stream(circuit, &circuit->rcv_stream);
 
-	retval = circuit->rx(circuit, ssnpa);
+	retval = circuit->rx(circuit, ssnpa, false);
 
 #if ISIS_METHOD != ISIS_METHOD_BPF
 	if (retval == ISIS_OK)
@@ -1868,6 +1912,8 @@ int send_hello(struct isis_circuit *circuit, int level)
 
 	isis_tlvs_set_protocols_supported(tlvs, &circuit->nlpids);
 
+	isis_tlvs_add_tcp_port(tlvs, circuit->tcp_port);
+
 	/*
 	 * MT Supported TLV
 	 *
@@ -1928,7 +1974,7 @@ int send_hello(struct isis_circuit *circuit, int level)
 
 	pdu_counter_count(circuit->area->pdu_tx_counters,
 			  hello_pdu_type(circuit, level));
-	retval = circuit->tx(circuit, level);
+	retval = circuit->tx(circuit, level, false);
 	if (retval != ISIS_OK)
 		flog_err(EC_ISIS_PACKET,
 			 "ISIS-Adj (%s): Send L%d IIH on %s failed",
@@ -2140,7 +2186,7 @@ int send_csnp(struct isis_circuit *circuit, int level)
 		}
 
 		pdu_counter_count(circuit->area->pdu_tx_counters, pdu_type);
-		int retval = circuit->tx(circuit, level);
+		int retval = circuit->tx(circuit, level, false);
 		if (retval != ISIS_OK) {
 			flog_err(EC_ISIS_PACKET,
 				 "ISIS-Snp (%s): Send L%d CSNP on %s failed",
@@ -2303,7 +2349,7 @@ static int send_psnp(int level, struct isis_circuit *circuit)
 		}
 
 		pdu_counter_count(circuit->area->pdu_tx_counters, pdu_type);
-		int retval = circuit->tx(circuit, level);
+		int retval = circuit->tx(circuit, level, true);
 		if (retval != ISIS_OK) {
 			flog_err(EC_ISIS_PACKET,
 				 "ISIS-Snp (%s): Send L%d PSNP on %s failed",
@@ -2447,7 +2493,7 @@ void send_lsp(struct isis_circuit *circuit, struct isis_lsp *lsp,
 
 	clear_srm = 0;
 	pdu_counter_count(circuit->area->pdu_tx_counters, pdu_type);
-	retval = circuit->tx(circuit, lsp->level);
+	retval = circuit->tx(circuit, lsp->level, true);
 	if (retval != ISIS_OK) {
 		flog_err(EC_ISIS_PACKET,
 			 "ISIS-Upd (%s): Send L%d LSP on %s failed %s",

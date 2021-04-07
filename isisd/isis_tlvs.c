@@ -1781,6 +1781,78 @@ static int unpack_tlv_protocols_supported(enum isis_tlv_context context,
 	return 0;
 }
 
+/**
+* function used to pack the port TLV 15
+*/
+static void format_tlv_tcp_port(struct isis_tcp_port *port,
+							struct sbuf *buf, int indent)
+{
+	if(!port || !port->len || !port->port)
+		return;
+	sbuf_push(buf, indent, "Tcp port : %d\n", port->port);
+}
+
+static void copy_tlv_tcp_port(struct isis_tcp_port *src, struct isis_tcp_port *dest)
+{
+	if(!src->len || src->port)
+		return;
+
+	dest->len = src->len;
+	dest->port = src->port;
+}
+
+static void free_tlv_tcp_port(struct isis_tcp_port *i)
+{
+	XFREE(MTYPE_ISIS_TLV, i);
+}
+
+static json_object *format_json_item_tcp_port(struct isis_item *i)
+{
+	return NULL;
+}
+
+static int pack_tlv_tcp_port(struct isis_tcp_port *port, struct stream *s)
+{
+	if(!port || !port->len || !port->port)
+		return 0;
+
+	if(STREAM_WRITEABLE(s) < (unsigned)(port->len + 2))
+		return 1;
+
+	stream_putc(s, ISIS_TLV_TCP_PORT);
+	stream_putc(s, port->len);
+	stream_putw(s, port->port);
+	return 0;
+}
+
+static int unpack_tlv_tcp_port(enum isis_tlv_context context, uint8_t tlv_type,
+									uint8_t tlv_len, struct stream *s, 
+									struct sbuf *log,
+									void *dest, int indent)
+{
+	struct isis_tlvs *tlvs = dest;
+
+	sbuf_push(log, indent, "Unpacking Tcp port TLV...\n");
+	if(!tlv_len){
+		sbuf_push(log, indent, "WARNING: No port included\n");
+		return 0;
+	}
+
+	if(tlvs->tcp_port.port) {
+		sbuf_push(log, indent, "Warning port present multiple time\n");
+		stream_forward_getp(s, tlv_len);
+		return 0;
+	}
+
+	tlvs->tcp_port.len = tlv_len;
+	tlvs->tcp_port.port = stream_getw(s);
+
+	format_tlv_tcp_port(&tlvs->tcp_port, log, indent+2);
+
+	return 0;
+
+}
+
 /* Functions related to TLV 132 IPv4 Interface addresses */
 static struct isis_item *copy_item_ipv4_address(struct isis_item *i)
 {
@@ -1801,7 +1873,6 @@ static void format_item_ipv4_address(uint16_t mtid, struct isis_item *i,
 	sbuf_push(buf, indent, "IPv4 Interface Address: %s\n", addrbuf);
 }
 
-//TODO chercher si il y a le reverse de inet_ntop??
 static json_object *format_json_item_ipv4_address(struct isis_item *i)
 {
 	struct isis_ipv4_address *a = (struct isis_ipv4_address *)i;
@@ -4186,6 +4257,13 @@ static int pack_tlvs(struct isis_tlvs *tlvs, struct stream *stream,
 			copy_tlv_router_cap(tlvs->router_cap);
 	}
 
+	rv = pack_tlv_tcp_port(&tlvs->tcp_port, stream);
+	if(rv)
+		return rv;
+	if (fragment_tlvs) {
+		copy_tlv_tcp_port(&tlvs->tcp_port, &fragment_tlvs->tcp_port);
+	}
+
 	rv = pack_tlv_te_router_id(tlvs->te_router_id, stream);
 	if (rv)
 		return rv;
@@ -4421,6 +4499,7 @@ TLV_OPS(threeway_adj, "TLV 240 P2P Three-Way Adjacency");
 ITEM_TLV_OPS(ipv6_address, "TLV 232 IPv6 Interface Address"); //+-V
 ITEM_TLV_OPS(ipv6_reach, "TLV 236 IPv6 Reachability");
 TLV_OPS(router_cap, "TLV 242 Router Capability");
+TLV_OPS(tcp_port, "TLV 15 for the tcp port");
 
 ITEM_SUBTLV_OPS(prefix_sid, "Sub-TLV 3 SR Prefix-SID"); //
 SUBTLV_OPS(ipv6_source_prefix, "Sub-TLV 22 IPv6 Source Prefix");
@@ -4450,6 +4529,7 @@ static const struct tlv_ops *const tlv_table[ISIS_CONTEXT_MAX][ISIS_TLV_MAX] = {
 		[ISIS_TLV_MT_IPV6_REACH] = &tlv_ipv6_reach_ops,
 		[ISIS_TLV_THREE_WAY_ADJ] = &tlv_threeway_adj_ops,
 		[ISIS_TLV_ROUTER_CAPABILITY] = &tlv_router_cap_ops,
+		[ISIS_TLV_TCP_PORT] = &tlv_tcp_port_ops,
 	},
 	[ISIS_CONTEXT_SUBTLV_NE_REACH] = {},
 	[ISIS_CONTEXT_SUBTLV_IP_REACH] = {
@@ -4531,6 +4611,15 @@ void isis_tlvs_set_protocols_supported(struct isis_tlvs *tlvs,
 	} else {
 		tlvs->protocols_supported.protocols = NULL;
 	}
+}
+
+/**
+* use to send the port information
+*/
+void isis_tlvs_add_tcp_port(struct isis_tlvs *tlvs, uint16_t tport)
+{
+	tlvs->tcp_port.len = 2;
+	tlvs->tcp_port.port = tport;
 }
 
 void isis_tlvs_add_mt_router_info(struct isis_tlvs *tlvs, uint16_t mtid,

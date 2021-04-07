@@ -83,8 +83,12 @@ struct isis_circuit {
 	struct isis_area *area;      /* back pointer to the area */
 	struct interface *interface; /* interface info from z */
 	int fd;			     /* IS-IS l1/2 socket */
+	int tcp_fd;			/* tcp socket */
 	int sap_length;		     /* SAP length for DLPI */
 	struct nlpids nlpids;
+	bool tcp_connected;
+	bool not_listening; // use to not add a read_thread every time on the tcp_socket
+	uint16_t tcp_port; /* the port to connect with tcp */
 	/*
 	 * Threads
 	 */
@@ -96,9 +100,9 @@ struct isis_circuit {
 		level_arg[ISIS_LEVELS]; /* used as argument for threads */
 
 	/* there is no real point in two streams, just for programming kicker */
-	int (*rx)(struct isis_circuit *circuit, uint8_t *ssnpa);
+	int (*rx)(struct isis_circuit *circuit, uint8_t *ssnpa, int port_fd);
 	struct stream *rcv_stream; /* Stream for receiving */
-	int (*tx)(struct isis_circuit *circuit, int level);
+	int (*tx)(struct isis_circuit *circuit, int level, bool is_lsp);
 	struct stream *snd_stream; /* Stream for sending */
 	int idx;		   /* idx in S[RM|SN] flags */
 #define CIRCUIT_T_UNKNOWN    0
@@ -218,6 +222,8 @@ ferr_r isis_circuit_passwd_hmac_md5_set(struct isis_circuit *circuit,
 
 int isis_circuit_mt_enabled_set(struct isis_circuit *circuit, uint16_t mtid,
 				bool enabled);
+
+int test(struct thread *thread);
 
 #ifdef FABRICD
 DECLARE_HOOK(isis_circuit_config_write,

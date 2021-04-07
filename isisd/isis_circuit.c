@@ -122,6 +122,8 @@ struct isis_circuit *isis_circuit_new(struct isis *isis)
 		"/frr-interface:lib/interface/frr-isisd:isis/metric/level-1");
 	circuit->te_metric[1] = yang_get_default_uint32(
 		"/frr-interface:lib/interface/frr-isisd:isis/metric/level-2");
+	circuit->tcp_connected = false;
+	circuit->not_listening = true;
 
 	for (i = 0; i < 2; i++) {
 		circuit->level_arg[i].level = i + 1;
@@ -596,6 +598,11 @@ void isis_circuit_prepare(struct isis_circuit *circuit)
 #if ISIS_METHOD != ISIS_METHOD_DLPI
 	thread_add_read(master, isis_receive, circuit, circuit->fd,
 			&circuit->t_read);
+	if(circuit->tcp_connected && circuit->not_listening){
+		thread_add_read(master, isis_tcp_receive, circuit, circuit->tcp_fd,
+						NULL);
+		circuit->not_listening = false;
+	}
 #else
 	thread_add_timer_msec(master, isis_receive, circuit,
 			      listcount(circuit->area->circuit_list) * 100,
@@ -715,6 +722,13 @@ int isis_circuit_up(struct isis_circuit *circuit)
 	/* unified init for circuits; ignore warnings below this level */
 	retv = isis_sock_init(circuit);
 	if (retv != ISIS_OK) {
+		isis_circuit_down(circuit);
+		return retv;
+	}
+	
+	/* open a tcp socket */
+	retv = isis_tcp_sock_init(circuit);
+	if (retv != ISIS_OK){
 		isis_circuit_down(circuit);
 		return retv;
 	}

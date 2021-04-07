@@ -42,8 +42,11 @@
 #include "isisd/isis_constants.h"
 #include "isisd/isis_circuit.h"
 #include "isisd/isis_network.h"
+#include "isisd/isis_tlvs.h"
 
 #include "privs.h"
+
+#define PORT 8080
 
 /* tcpdump -i eth0 'isis' -dd */
 static const struct sock_filter isisfilter[] = {
@@ -187,6 +190,146 @@ static int open_packet_socket(struct isis_circuit *circuit)
 }
 
 /*
+* fonction called by the thread to 
+* open the connection
+*/
+int open_connection(struct thread *thread)
+{
+	struct isis_circuit *circuit;
+	struct sockaddr_in address;
+	int addrlen = sizeof(address);
+	int connected_tcp_socket;
+
+	//getting the circuit
+	printf("GETTING INPUT ON TCP SOCKET \n");
+	circuit = THREAD_ARG(thread);
+	assert(circuit);
+	if((connected_tcp_socket = accept(circuit->tcp_fd, (struct sockaddr *)&address, 
+									  (socklen_t*)&addrlen)) < 0){
+		zlog_debug("ERROR with connect\n");
+		return ISIS_WARNING;
+	}
+	/*if(fcntl(connected_tcp_socket, F_SETFL, O_NONBLOCK) == -1){
+		zlog_debug("EROOR fcntl %s", safe_strerror(errno));
+		return ISIS_WARNING;
+	}*/
+	circuit->tcp_fd = connected_tcp_socket;
+	circuit->tcp_connected = true;
+	thread_add_read(master, isis_tcp_receive, circuit, circuit->tcp_fd, NULL);
+	circuit->not_listening = false;
+	return ISIS_OK;
+}
+
+/*
+* function used to open the tcp socket
+*/
+static int open_tcp_socket(struct isis_circuit *circuit)
+{
+	//TODO better to do a check of the validity of the ip
+	if(strcmp(circuit->interface->name, "enp0s10") != 0){
+		printf("pas enp0s10\n");
+		return ISIS_OK;
+	}
+	struct sockaddr_in servaddr;
+	int tcp_sock, retval = ISIS_OK;
+	struct vrf *vrf = NULL;
+	int opt = TRUE;
+
+	vrf = vrf_lookup_by_id(circuit->interface->vrf_id);
+
+	if (vrf == NULL) {
+		zlog_warn("open_packet_socket(): failed to find vrf node");
+		return ISIS_WARNING;
+	}
+
+	tcp_sock = vrf_socket(AF_INET, SOCK_STREAM, 0, 
+						 circuit->interface->vrf_id, vrf->name);
+
+	if( tcp_sock < 0){
+		zlog_warn("open_tcp_socket failed: %s", safe_strerror(errno));
+		return ISIS_WARNING;
+	}
+
+	if( setsockopt(tcp_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt))){
+		zlog_warn("open_tcp_socket(): setsockopt failed: %s",
+			  safe_strerror(errno));
+		return ISIS_WARNING;
+	}
+
+	/*getting the ip address of the interface */
+	//TODO faire socket non bloquant
+	char ip_address[15];
+	struct ifreq ifr;
+	ifr.ifr_addr.sa_family = AF_INET;
+	printf("getting ip for %s\n", circuit->interface->name);
+	strncpy(ifr.ifr_name, circuit->interface->name, IFNAMSIZ-1);
+	ioctl(tcp_sock, SIOCGIFADDR, &ifr);
+	strcpy(ip_address,inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+	printf("IP address is : %s\n", ip_address);
+
+	/* bind to physical address */
+	memset(&servaddr, 0, sizeof(struct sockaddr_in));
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = inet_addr(ip_address);
+	servaddr.sin_port = 0;//htons(PORT);
+	if( bind(tcp_sock, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0){
+		zlog_warn("open_tcp_socket(): bind() failed: %s",
+			  safe_strerror(errno));
+		close(tcp_sock);
+		return ISIS_WARNING;		
+	}
+	unsigned int len = sizeof(servaddr);
+	if( getsockname(tcp_sock,(struct sockaddr*)&servaddr, &len) != 0){
+		zlog_warn("error getsockname : %s\n", safe_strerror(errno));
+		return ISIS_WARNING;
+	}
+	circuit->tcp_port = ntohs(servaddr.sin_port);
+	printf("port : %u \n",circuit->tcp_port);
+
+	// 5 is the max queue for pending connection
+	if(listen(tcp_sock, 5) != 0){
+		zlog_warn("error listen... \n");
+		return ISIS_WARNING;
+	}
+
+	circuit->tcp_fd = tcp_sock;
+	thread_add_read(master, open_connection, circuit, tcp_sock, NULL);
+
+	return retval;
+
+}
+
+/*
+* open a tcp connection
+*/
+void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *circuit)
+{
+	struct sockaddr_in servaddr;
+	struct isis_ipv4_address *address = (struct isis_ipv4_address *)addresse;
+
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if(sockfd == -1){
+		zlog_warn("socket creation failed in open_tcp_connection...\n");
+		return;
+	}
+
+	bzero(&servaddr, sizeof(servaddr));
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = inet_addr("10.10.10.3");// TODO address->addr;
+	servaddr.sin_port = htons(circuit->tcp_port);
+
+	if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) != 0){
+		zlog_warn("Connection with the server failed... \n");
+		return;
+	}
+
+	circuit->tcp_fd = sockfd;
+	circuit->tcp_connected = true;
+	thread_add_read(master, isis_tcp_receive, circuit, circuit->tcp_fd, &circuit->t_read);
+	circuit->not_listening = false;
+}
+
+/*
  * Create the socket and set the tx/rx funcs
  */
 int isis_sock_init(struct isis_circuit *circuit)
@@ -220,6 +363,26 @@ int isis_sock_init(struct isis_circuit *circuit)
 	return retval;
 }
 
+/*
+* create the TCP socket to send lsp (and psnp) through
+*/
+int isis_tcp_sock_init(struct isis_circuit *circuit)
+{
+	int retval = ISIS_OK;
+
+	frr_with_privs(&isisd_privs) {
+
+		retval = open_tcp_socket(circuit);
+
+		if(retval != ISIS_OK){
+			zlog_warn("%s: could not open tcp socket", __func__);
+			break;
+		}
+	}
+
+	return retval;
+}
+
 static inline int llc_check(uint8_t *llc)
 {
 	if (*llc != ISO_SAP || *(llc + 1) != ISO_SAP || *(llc + 2) != 3)
@@ -228,80 +391,101 @@ static inline int llc_check(uint8_t *llc)
 	return 1;
 }
 
-int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa)
+int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_lsp)
 {
 	int bytesread, addr_len;
-	struct sockaddr_ll s_addr;
-	uint8_t llc[LLC_LEN];
+		struct sockaddr_ll s_addr;
+		uint8_t llc[LLC_LEN];
 
-	addr_len = sizeof(s_addr);
+		addr_len = sizeof(s_addr);
 
-	memset(&s_addr, 0, sizeof(struct sockaddr_ll));
+		memset(&s_addr, 0, sizeof(struct sockaddr_ll));
 
-	bytesread =
-		recvfrom(circuit->fd, (void *)&llc, LLC_LEN, MSG_PEEK,
-			 (struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
-
-	if ((bytesread < 0)
-	    || (s_addr.sll_ifindex != (int)circuit->interface->ifindex)) {
+	if(is_lsp){
+		//DO ONE THING TO READ ON TCP SOCKET
+		unsigned int max_size =
+			circuit->interface->mtu > circuit->interface->mtu6
+				? circuit->interface->mtu
+				: circuit->interface->mtu6;
+		uint8_t temp_buff[max_size];
+		bytesread =
+			recvfrom(circuit->tcp_fd, temp_buff, max_size, MSG_DONTWAIT,
+				(struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
 		if (bytesread < 0) {
-			zlog_warn(
-				"isis_recv_packet_bcast(): ifname %s, fd %d, bytesread %d, recvfrom(): %s",
-				circuit->interface->name, circuit->fd,
-				bytesread, safe_strerror(errno));
+			zlog_warn("%s: recvfrom() failed", __func__);
+			return ISIS_WARNING;
 		}
-		if (s_addr.sll_ifindex != (int)circuit->interface->ifindex) {
-			zlog_warn(
-				"packet is received on multiple interfaces: socket interface %d, circuit interface %d, packet type %u",
-				s_addr.sll_ifindex, circuit->interface->ifindex,
-				s_addr.sll_pkttype);
+		/* then we lose the LLC */
+		stream_write(circuit->rcv_stream, temp_buff + LLC_LEN, bytesread - LLC_LEN);
+		memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
+
+		return ISIS_OK;
+	}else{
+		bytesread =
+			recvfrom(circuit->fd, (void *)&llc, LLC_LEN, MSG_PEEK,
+				(struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
+
+		if ((bytesread < 0)
+			|| (s_addr.sll_ifindex != (int)circuit->interface->ifindex)) {
+			if (bytesread < 0) {
+				zlog_warn(
+					"isis_recv_packet_bcast(): ifname %s, fd %d, bytesread %d, recvfrom(): %s",
+					circuit->interface->name, circuit->fd,
+					bytesread, safe_strerror(errno));
+			}
+			if (s_addr.sll_ifindex != (int)circuit->interface->ifindex) {
+				zlog_warn(
+					"packet is received on multiple interfaces: socket interface %d, circuit interface %d, packet type %u",
+					s_addr.sll_ifindex, circuit->interface->ifindex,
+					s_addr.sll_pkttype);
+			}
+
+			/* get rid of the packet */
+			bytesread = recvfrom(circuit->fd, discard_buff,
+						sizeof(discard_buff), MSG_DONTWAIT,
+						(struct sockaddr *)&s_addr,
+						(socklen_t *)&addr_len);
+
+			if (bytesread < 0)
+				zlog_warn("isis_recv_pdu_bcast(): recvfrom() failed");
+
+			return ISIS_WARNING;
+		}
+		/*
+		* Filtering by llc field, discard packets sent by this host (other
+		* circuit)
+		*/ 
+		if (!llc_check(llc) || s_addr.sll_pkttype == PACKET_OUTGOING) {
+			/*  Read the packet into discard buff */
+			bytesread = recvfrom(circuit->fd, discard_buff,
+						sizeof(discard_buff), MSG_DONTWAIT,
+						(struct sockaddr *)&s_addr,
+						(socklen_t *)&addr_len);
+			if (bytesread < 0)
+				zlog_warn("isis_recv_pdu_bcast(): recvfrom() failed");
+			return ISIS_WARNING;
 		}
 
-		/* get rid of the packet */
-		bytesread = recvfrom(circuit->fd, discard_buff,
-				     sizeof(discard_buff), MSG_DONTWAIT,
-				     (struct sockaddr *)&s_addr,
-				     (socklen_t *)&addr_len);
+		/* Ensure that we have enough space for a pdu padded to fill the mtu */
+		unsigned int max_size =
+			circuit->interface->mtu > circuit->interface->mtu6
+				? circuit->interface->mtu
+				: circuit->interface->mtu6;
+		uint8_t temp_buff[max_size];
+		bytesread =
+			recvfrom(circuit->fd, temp_buff, max_size, MSG_DONTWAIT,
+				(struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
+		if (bytesread < 0) {
+			zlog_warn("%s: recvfrom() failed", __func__);
+			return ISIS_WARNING;
+		}
+		/* then we lose the LLC */
+		stream_write(circuit->rcv_stream, temp_buff + LLC_LEN,
+				bytesread - LLC_LEN);
+		memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
 
-		if (bytesread < 0)
-			zlog_warn("isis_recv_pdu_bcast(): recvfrom() failed");
-
-		return ISIS_WARNING;
+		return ISIS_OK;
 	}
-	/*
-	 * Filtering by llc field, discard packets sent by this host (other
-	 * circuit)
-	 */
-	if (!llc_check(llc) || s_addr.sll_pkttype == PACKET_OUTGOING) {
-		/*  Read the packet into discard buff */
-		bytesread = recvfrom(circuit->fd, discard_buff,
-				     sizeof(discard_buff), MSG_DONTWAIT,
-				     (struct sockaddr *)&s_addr,
-				     (socklen_t *)&addr_len);
-		if (bytesread < 0)
-			zlog_warn("isis_recv_pdu_bcast(): recvfrom() failed");
-		return ISIS_WARNING;
-	}
-
-	/* Ensure that we have enough space for a pdu padded to fill the mtu */
-	unsigned int max_size =
-		circuit->interface->mtu > circuit->interface->mtu6
-			? circuit->interface->mtu
-			: circuit->interface->mtu6;
-	uint8_t temp_buff[max_size];
-	bytesread =
-		recvfrom(circuit->fd, temp_buff, max_size, MSG_DONTWAIT,
-			 (struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
-	if (bytesread < 0) {
-		zlog_warn("%s: recvfrom() failed", __func__);
-		return ISIS_WARNING;
-	}
-	/* then we lose the LLC */
-	stream_write(circuit->rcv_stream, temp_buff + LLC_LEN,
-		     bytesread - LLC_LEN);
-	memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
-
-	return ISIS_OK;
 }
 
 int isis_recv_pdu_p2p(struct isis_circuit *circuit, uint8_t *ssnpa)
@@ -342,7 +526,7 @@ int isis_recv_pdu_p2p(struct isis_circuit *circuit, uint8_t *ssnpa)
 	return ISIS_OK;
 }
 
-int isis_send_pdu_bcast(struct isis_circuit *circuit, int level)
+int isis_send_pdu_bcast(struct isis_circuit *circuit, int level, bool is_lsp)
 {
 	struct msghdr msg;
 	struct iovec iov[2];
@@ -385,12 +569,24 @@ int isis_send_pdu_bcast(struct isis_circuit *circuit, int level)
 	iov[1].iov_base = circuit->snd_stream->data;
 	iov[1].iov_len = stream_get_endp(circuit->snd_stream);
 
-	if (sendmsg(circuit->fd, &msg, 0) < 0) {
-		zlog_warn("IS-IS pfpacket: could not transmit packet on %s: %s",
+	//TODO not sure only lsp in the buffer
+	if(is_lsp){
+		if (sendmsg(circuit->tcp_fd, &msg, 0) < 0) {
+			zlog_warn("IS-IS pfpacket: could not transmit packet on TCP socket %s: %s",
 			  circuit->interface->name, safe_strerror(errno));
-		if (ERRNO_IO_RETRY(errno))
-			return ISIS_WARNING;
-		return ISIS_ERROR;
+			if (ERRNO_IO_RETRY(errno))
+				return ISIS_WARNING;
+			return ISIS_ERROR;
+		}
+
+	} else {
+		if (sendmsg(circuit->fd, &msg, 0) < 0) {
+			zlog_warn("IS-IS pfpacket: could not transmit packet on %s: %s",
+			  circuit->interface->name, safe_strerror(errno));
+			if (ERRNO_IO_RETRY(errno))
+				return ISIS_WARNING;
+			return ISIS_ERROR;
+		}
 	}
 	return ISIS_OK;
 }

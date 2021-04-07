@@ -19,7 +19,7 @@
  * with this program; see the file COPYING; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
-
+#include "isisd/isis_tlvs.h"
 
 #ifndef _ZEBRA_ISIS_NETWORK_H
 #define _ZEBRA_ISIS_NETWORK_H
@@ -29,9 +29,13 @@ extern uint8_t ALL_L2_ISYSTEMS[];
 
 int isis_sock_init(struct isis_circuit *circuit);
 
-int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa);
+int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_lsp);
 int isis_recv_pdu_p2p(struct isis_circuit *circuit, uint8_t *ssnpa);
-int isis_send_pdu_bcast(struct isis_circuit *circuit, int level);
+int isis_send_pdu_bcast(struct isis_circuit *circuit, int level, bool is_lsp);
 int isis_send_pdu_p2p(struct isis_circuit *circuit, int level);
+
+int isis_tcp_sock_init(struct isis_circuit *circuit);
+int open_connection(struct thread *thread); //TODO should be rename to accept_connection
+void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *circuit);
 
 #endif /* _ZEBRA_ISIS_NETWORK_H */

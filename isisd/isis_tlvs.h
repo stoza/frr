@@ -43,6 +43,11 @@ struct isis_area_address {
 	uint8_t len;
 };
 
+struct isis_tcp_port {
+	uint8_t len;
+	uint16_t port;
+};
+
 #define ISIS_WIDE_METRIC_INFINITY   0xFFFFFE
 #define ISIS_NARROW_METRIC_INFINITY 62
 
@@ -336,6 +341,7 @@ struct isis_tlvs {
 	struct isis_threeway_adj *threeway_adj;
 	struct isis_router_cap *router_cap;
 	struct isis_spine_leaf *spine_leaf;
+	struct isis_tcp_port tcp_port; //TODO porbably not necessarly a item_list
 };
 
 enum isis_tlv_context {
@@ -364,6 +370,7 @@ enum isis_tlv_type {
 	ISIS_TLV_LSP_ENTRY = 9,
 	ISIS_TLV_AUTH = 10,
 	ISIS_TLV_PURGE_ORIGINATOR = 13,
+	ISIS_TLV_TCP_PORT = 15,
 	ISIS_TLV_EXTENDED_REACH = 22,
 
 	ISIS_TLV_OLDSTYLE_IP_REACH = 128,
@@ -648,4 +655,5 @@ json_object *format_json_te_router_id(const struct in_addr *id);
 json_object *format_json_router_cap(struct isis_router_cap *cap);
 void json_extended_reachability_2_tlv(struct isis_tlvs *tlv, json_object *reachability);
 
+void isis_tlvs_add_tcp_port(struct isis_tlvs *tlvs, uint16_t tport);
 #endif
