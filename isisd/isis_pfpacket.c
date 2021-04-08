@@ -410,13 +410,15 @@ int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_ls
 		uint8_t temp_buff[max_size];
 		bytesread =
 			recvfrom(circuit->tcp_fd, temp_buff, max_size, MSG_DONTWAIT,
-				(struct sockaddr *)&s_addr, (socklen_t *)&addr_len);
+				NULL, 0);
 		if (bytesread < 0) {
 			zlog_warn("%s: recvfrom() failed", __func__);
 			return ISIS_WARNING;
 		}
 		/* then we lose the LLC */
+		zlog_debug("BYTERAED : %u",bytesread);
 		stream_write(circuit->rcv_stream, temp_buff  ,bytesread );
+		stream_hexdump(circuit->rcv_stream);
 		memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
 
 		return ISIS_OK;
