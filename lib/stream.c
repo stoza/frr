@@ -170,6 +170,24 @@ struct stream *stream_dupcat(const struct stream *s1, const struct stream *s2,
 	return new;
 }
 
+/*
+* this function is used to copy a part of a stream in another stream
+* it copies from offset to endp.
+*/
+void stream_copy_part(struct stream *dest, const struct stream *src, size_t offset)
+{
+	size_t length;
+
+	STREAM_VERIFY_SANE(src);
+	length = stream_get_endp(src) - offset;
+
+	dest->getp = 0;
+	dest->endp = length;
+
+	memcpy(dest->data, src->data + offset, length);
+
+}
+
 size_t stream_resize_inplace(struct stream **sptr, size_t newsize)
 {
 	struct stream *orig = *sptr;

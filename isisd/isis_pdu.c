@@ -537,15 +537,19 @@ static int process_lan_hello(struct iih_info *iih)
 	return ISIS_OK;
 }
 
+//TODO MUST ADD THE OFFSET TO WHICH ADD
 static int pdu_len_validate(uint16_t pdu_len, struct isis_circuit *circuit)
 {
-	if (pdu_len < stream_get_getp(circuit->rcv_stream)
-	    || pdu_len > ISO_MTU(circuit)
+	//MAIS WTF PAS DE SENS
+	if (//pdu_len < stream_get_getp(circuit->rcv_stream)
+	     pdu_len > ISO_MTU(circuit)
 	    || pdu_len > stream_get_endp(circuit->rcv_stream))
 		return 1;
 
-	if (pdu_len < stream_get_endp(circuit->rcv_stream))
-		stream_set_endp(circuit->rcv_stream, pdu_len);
+	if (pdu_len < stream_get_endp(circuit->rcv_stream)){
+		size_t offset = stream_get_getp(circuit->rcv_stream) - 27 + pdu_len;
+		stream_set_endp(circuit->rcv_stream, offset);
+	}
 	return 0;
 }
 
@@ -866,12 +870,27 @@ static int process_lsp(uint8_t pdu_type, struct isis_circuit *circuit,
 	hdr.checksum = stream_getw(circuit->rcv_stream);
 	hdr.lsp_bits = stream_getc(circuit->rcv_stream);
 
+	//-27 because we ve already read the fixed header + lsp header
+	// TODO pas besoinde prendre la taille du packet je dirai
+	if(stream_get_getp(circuit->rcv_stream) - 27 + hdr.pdu_len > stream_get_endp(circuit->rcv_stream)){
+		size_t pdu_start_offset = stream_get_getp(circuit->rcv_stream) - (ISIS_FIXED_HDR_LEN + ISIS_LSP_HDR_LEN);
+
+		isis_circuit_tcp_stream(circuit, &circuit->tcp_buffer, hdr.pdu_len);
+		stream_copy_part(circuit->tcp_buffer, circuit->rcv_stream, pdu_start_offset);
+		zlog_warn("The entire pdu is not in this packet");
+		//stream_hexdump(circuit->tcp_buffer);
+		stream_set_getp(circuit->rcv_stream, stream_get_endp(circuit->rcv_stream)); // on fait comme si on avait tout lu
+		circuit->is_partial_packet = true;
+		return ISIS_WARNING;
+	}
+
 #ifndef FABRICD
 	/* send northbound notification */
 	isis_notif_lsp_received(circuit, rawlspid_print(hdr.lsp_id), hdr.seqno,
 				time(NULL), sysid_print(hdr.lsp_id));
 #endif /* ifndef FABRICD */
 
+	// ça ramène le truc a endp = iih.pdu_length
 	if (pdu_len_validate(hdr.pdu_len, circuit)) {
 		zlog_debug("ISIS-Upd (%s): LSP %s invalid LSP length %hu",
 			   circuit->area->area_tag, rawlspid_print(hdr.lsp_id),
@@ -899,13 +918,16 @@ static int process_lsp(uint8_t pdu_type, struct isis_circuit *circuit,
 
 	/* Checksum sanity check - FIXME: move to correct place */
 	/* 12 = sysid+pdu+remtime */
-	if (iso_csum_verify(STREAM_DATA(circuit->rcv_stream) + 12,
-			    hdr.pdu_len - 12, hdr.checksum, 12)) {
-		zlog_debug(
-			"ISIS-Upd (%s): LSP %s invalid LSP checksum 0x%04hx",
-			circuit->area->area_tag, rawlspid_print(hdr.lsp_id),
-			hdr.checksum);
-		return ISIS_WARNING;
+	// BUT CHECKSUM NOT USEFUL IF TCP
+	if(!circuit->tcp_connected){
+		if (iso_csum_verify(STREAM_DATA(circuit->rcv_stream) + 12,
+				    hdr.pdu_len - 12, hdr.checksum, 12)) {
+			zlog_debug(
+				"ISIS-Upd (%s): LSP %s invalid LSP checksum 0x%04hx",
+				circuit->area->area_tag, rawlspid_print(hdr.lsp_id),
+				hdr.checksum);
+			return ISIS_WARNING;
+		}
 	}
 
 	/* 7.3.15.1 a) 1 - external domain circuit will discard lsps */
@@ -1256,6 +1278,7 @@ out:
 	fabricd_trigger_csnp(circuit->area, circuit_scoped);
 
 	isis_free_tlvs(tlvs);
+	stream_set_endp(circuit->rcv_stream, pdu_end);
 	return retval;
 }
 
@@ -1589,146 +1612,164 @@ static int pdu_size(uint8_t pdu_type, uint8_t *size)
 int isis_handle_pdu(struct isis_circuit *circuit, uint8_t *ssnpa)
 {
 	int retval = ISIS_OK;
-	size_t pdu_start = stream_get_getp(circuit->rcv_stream);
-	size_t pdu_end = stream_get_endp(circuit->rcv_stream);
-	char raw_pdu[pdu_end - pdu_start];
+	do {
+		size_t pdu_start = stream_get_getp(circuit->rcv_stream);
+		size_t pdu_end = stream_get_endp(circuit->rcv_stream);
+		char raw_pdu[pdu_end - pdu_start];
 
-	stream_get_from(raw_pdu, circuit->rcv_stream, pdu_start,
-			pdu_end - pdu_start);
+		stream_get_from(raw_pdu, circuit->rcv_stream, pdu_start,
+				pdu_end - pdu_start);
 
-	/* Verify that at least the 8 bytes fixed header have been received */
-	if (stream_get_endp(circuit->rcv_stream) < ISIS_FIXED_HDR_LEN) {
-		flog_err(EC_ISIS_PACKET, "PDU is too short to be IS-IS.");
-		return ISIS_ERROR;
-	}
-
-	uint8_t idrp = stream_getc(circuit->rcv_stream);
-	uint8_t length = stream_getc(circuit->rcv_stream);
-	uint8_t version1 = stream_getc(circuit->rcv_stream);
-	uint8_t id_len = stream_getc(circuit->rcv_stream);
-	uint8_t pdu_type = stream_getc(circuit->rcv_stream)
-			   & 0x1f; /* bits 6-8 are reserved */
-	uint8_t version2 = stream_getc(circuit->rcv_stream);
-
-	stream_forward_getp(circuit->rcv_stream, 1); /* reserved */
-	uint8_t max_area_addrs = stream_getc(circuit->rcv_stream);
-
-	pdu_counter_count(circuit->area->pdu_rx_counters, pdu_type);
-
-	if (idrp == ISO9542_ESIS) {
-		flog_err(EC_LIB_DEVELOPMENT,
-			 "No support for ES-IS packet IDRP=%hhx", idrp);
-		return ISIS_ERROR;
-	}
-
-	if (idrp != ISO10589_ISIS) {
-		flog_err(EC_ISIS_PACKET, "Not an IS-IS packet IDRP=%hhx",
-			 idrp);
-		return ISIS_ERROR;
-	}
-
-	if (version1 != 1) {
-		zlog_warn("Unsupported ISIS version %hhu", version1);
-#ifndef FABRICD
-		/* send northbound notification */
-		isis_notif_version_skew(circuit, version1, raw_pdu);
-#endif /* ifndef FABRICD */
-		return ISIS_WARNING;
-	}
-
-	if (id_len != 0 && id_len != ISIS_SYS_ID_LEN) {
-		flog_err(
-			EC_ISIS_PACKET,
-			"IDFieldLengthMismatch: ID Length field in a received PDU  %hhu, while the parameter for this IS is %u",
-			id_len, ISIS_SYS_ID_LEN);
-		circuit->id_len_mismatches++;
-#ifndef FABRICD
-		/* send northbound notification */
-		isis_notif_id_len_mismatch(circuit, id_len, raw_pdu);
-#endif /* ifndef FABRICD */
-		return ISIS_ERROR;
-	}
-
-	uint8_t expected_length;
-	if (pdu_size(pdu_type, &expected_length)) {
-		zlog_warn("Unsupported ISIS PDU %hhu", pdu_type);
-		return ISIS_WARNING;
-	}
-
-	if (length != expected_length) {
-		flog_err(EC_ISIS_PACKET,
-			 "Expected fixed header length = %hhu but got %hhu",
-			 expected_length, length);
-		return ISIS_ERROR;
-	}
-
-	if (stream_get_endp(circuit->rcv_stream) < length) {
-		flog_err(
-			EC_ISIS_PACKET,
-			"PDU is too short to contain fixed header of given PDU type.");
-		return ISIS_ERROR;
-	}
-
-	if (version2 != 1) {
-		zlog_warn("Unsupported ISIS PDU version %hhu", version2);
-#ifndef FABRICD
-		/* send northbound notification */
-		isis_notif_version_skew(circuit, version2, raw_pdu);
-#endif /* ifndef FABRICD */
-		return ISIS_WARNING;
-	}
-
-	if (circuit->is_passive) {
-		zlog_warn("Received ISIS PDU on passive circuit %s",
-			  circuit->interface->name);
-		return ISIS_WARNING;
-	}
-
-	/* either 3 or 0 */
-	if (pdu_type != FS_LINK_STATE /* FS PDU doesn't contain max area addr
-					 field */
-	    && max_area_addrs != 0
-	    && max_area_addrs != circuit->isis->max_area_addrs) {
-		flog_err(
-			EC_ISIS_PACKET,
-			"maximumAreaAddressesMismatch: maximumAreaAdresses in a received PDU %hhu while the parameter for this IS is %u",
-			max_area_addrs, circuit->isis->max_area_addrs);
-		circuit->max_area_addr_mismatches++;
-#ifndef FABRICD
-		/* send northbound notification */
-		isis_notif_max_area_addr_mismatch(circuit, max_area_addrs,
-						  raw_pdu);
-#endif /* ifndef FABRICD */
-		return ISIS_ERROR;
-	}
-
-	switch (pdu_type) {
-	case L1_LAN_HELLO:
-	case L2_LAN_HELLO:
-	case P2P_HELLO:
-		if (fabricd && pdu_type != P2P_HELLO)
+		/* Verify that at least the 8 bytes fixed header have been received */
+		//TODO in fact maybe here also put in buffer
+		if (stream_get_endp(circuit->rcv_stream) - stream_get_getp(circuit->rcv_stream) < ISIS_FIXED_HDR_LEN) {
+			flog_err(EC_ISIS_PACKET, "PDU is too short to be IS-IS.");
 			return ISIS_ERROR;
-		retval = process_hello(pdu_type, circuit, ssnpa);
-		break;
-	case L1_LINK_STATE:
-	case L2_LINK_STATE:
-	case FS_LINK_STATE:
-		if (fabricd
-		    && pdu_type != L2_LINK_STATE
-		    && pdu_type != FS_LINK_STATE)
+		}
+
+		uint8_t idrp = stream_getc(circuit->rcv_stream);
+		uint8_t length = stream_getc(circuit->rcv_stream);
+		uint8_t version1 = stream_getc(circuit->rcv_stream);
+		uint8_t id_len = stream_getc(circuit->rcv_stream);
+		uint8_t pdu_type = stream_getc(circuit->rcv_stream)
+				& 0x1f; /* bits 6-8 are reserved */
+		uint8_t version2 = stream_getc(circuit->rcv_stream);
+
+		stream_forward_getp(circuit->rcv_stream, 1); /* reserved */
+		uint8_t max_area_addrs = stream_getc(circuit->rcv_stream);
+
+		pdu_counter_count(circuit->area->pdu_rx_counters, pdu_type);
+
+		if (idrp == ISO9542_ESIS) {
+			flog_err(EC_LIB_DEVELOPMENT,
+				"No support for ES-IS packet IDRP=%hhx", idrp);
 			return ISIS_ERROR;
-		retval = process_lsp(pdu_type, circuit, ssnpa, max_area_addrs);
-		break;
-	case L1_COMPLETE_SEQ_NUM:
-	case L2_COMPLETE_SEQ_NUM:
-	case L1_PARTIAL_SEQ_NUM:
-	case L2_PARTIAL_SEQ_NUM:
-		retval = process_snp(pdu_type, circuit, ssnpa);
-		break;
-	default:
-		zlog_debug("Unknow pdu type %u", pdu_type);
-		return ISIS_ERROR;
-	}
+		}
+
+		if (idrp != ISO10589_ISIS) {
+			flog_err(EC_ISIS_PACKET, "Not an IS-IS packet IDRP=%hhx",
+				idrp);
+			return ISIS_ERROR;
+		}
+
+		if (version1 != 1) {
+			zlog_warn("Unsupported ISIS version %hhu", version1);
+	#ifndef FABRICD
+			/* send northbound notification */
+			isis_notif_version_skew(circuit, version1, raw_pdu);
+	#endif /* ifndef FABRICD */
+			return ISIS_WARNING;
+		}
+
+		if (id_len != 0 && id_len != ISIS_SYS_ID_LEN) {
+			flog_err(
+				EC_ISIS_PACKET,
+				"IDFieldLengthMismatch: ID Length field in a received PDU  %hhu, while the parameter for this IS is %u",
+				id_len, ISIS_SYS_ID_LEN);
+			circuit->id_len_mismatches++;
+	#ifndef FABRICD
+			/* send northbound notification */
+			isis_notif_id_len_mismatch(circuit, id_len, raw_pdu);
+	#endif /* ifndef FABRICD */
+			return ISIS_ERROR;
+		}
+
+		uint8_t expected_length;
+		if (pdu_size(pdu_type, &expected_length)) {
+			zlog_warn("Unsupported ISIS PDU %hhu", pdu_type);
+			return ISIS_WARNING;
+		}
+
+		if (length != expected_length) {
+			flog_err(EC_ISIS_PACKET,
+				"Expected fixed header length = %hhu but got %hhu",
+				expected_length, length);
+			return ISIS_ERROR;
+		}
+
+		if (stream_get_endp(circuit->rcv_stream) < length) {
+			flog_err(
+				EC_ISIS_PACKET,
+				"PDU is too short to contain fixed header of given PDU type.");
+			return ISIS_ERROR;
+		}
+
+		//TODO ici je doit copier ce qu il reste dans un buffer et puis
+		// attendre le packet suivant
+		if(stream_get_getp(circuit->rcv_stream) + length > stream_get_endp(circuit->rcv_stream)){
+			size_t pdu_start_offset = stream_get_getp(circuit->rcv_stream) - ISIS_FIXED_HDR_LEN; // a cause du fixed header
+
+			isis_circuit_tcp_stream(circuit, &circuit->tcp_buffer, length); // prepare the buffer
+			stream_copy_part(circuit->tcp_buffer, circuit->rcv_stream, pdu_start_offset);
+			zlog_warn("All the data is not in this packet");
+			//stream_hexdump(circuit->tcp_buffer);
+			stream_set_getp(circuit->rcv_stream, stream_get_endp(circuit->rcv_stream));
+			circuit->is_partial_packet = true;
+			return ISIS_WARNING;
+		}
+
+		if (version2 != 1) {
+			zlog_warn("Unsupported ISIS PDU version %hhu", version2);
+	#ifndef FABRICD
+			/* send northbound notification */
+			isis_notif_version_skew(circuit, version2, raw_pdu);
+	#endif /* ifndef FABRICD */
+			return ISIS_WARNING;
+		}
+
+		if (circuit->is_passive) {
+			zlog_warn("Received ISIS PDU on passive circuit %s",
+				circuit->interface->name);
+			return ISIS_WARNING;
+		}
+
+		/* either 3 or 0 */
+		if (pdu_type != FS_LINK_STATE /* FS PDU doesn't contain max area addr
+						field */
+			&& max_area_addrs != 0
+			&& max_area_addrs != circuit->isis->max_area_addrs) {
+			flog_err(
+				EC_ISIS_PACKET,
+				"maximumAreaAddressesMismatch: maximumAreaAdresses in a received PDU %hhu while the parameter for this IS is %u",
+				max_area_addrs, circuit->isis->max_area_addrs);
+			circuit->max_area_addr_mismatches++;
+	#ifndef FABRICD
+			/* send northbound notification */
+			isis_notif_max_area_addr_mismatch(circuit, max_area_addrs,
+							raw_pdu);
+	#endif /* ifndef FABRICD */
+			return ISIS_ERROR;
+		}
+		switch (pdu_type) {
+		case L1_LAN_HELLO:
+		case L2_LAN_HELLO:
+		case P2P_HELLO:
+			if (fabricd && pdu_type != P2P_HELLO)
+				return ISIS_ERROR;
+			retval = process_hello(pdu_type, circuit, ssnpa);
+			break;
+		case L1_LINK_STATE:
+		case L2_LINK_STATE:
+		case FS_LINK_STATE:
+			if (fabricd
+				&& pdu_type != L2_LINK_STATE
+				&& pdu_type != FS_LINK_STATE)
+				return ISIS_ERROR;
+			retval = process_lsp(pdu_type, circuit, ssnpa, max_area_addrs);
+			zlog_debug("THE STREAM is %s", (stream_get_getp(circuit->rcv_stream) == stream_get_endp(circuit->rcv_stream))
+											? "EMPTY" : "NOT EMPTY");
+			break;
+		case L1_COMPLETE_SEQ_NUM:
+		case L2_COMPLETE_SEQ_NUM:
+		case L1_PARTIAL_SEQ_NUM:
+		case L2_PARTIAL_SEQ_NUM:
+			retval = process_snp(pdu_type, circuit, ssnpa);
+			break;
+		default:
+			zlog_debug("Unknow pdu type %u", pdu_type);
+			return ISIS_ERROR;
+		}
+	} while(stream_get_endp(circuit->rcv_stream) != stream_get_getp(circuit->rcv_stream));
 
 	return retval;
 }
@@ -2349,7 +2390,7 @@ static int send_psnp(int level, struct isis_circuit *circuit)
 		}
 
 		pdu_counter_count(circuit->area->pdu_tx_counters, pdu_type);
-		int retval = circuit->tx(circuit, level, true);
+		int retval = circuit->tx(circuit, level, true); //TODO MUST LOOK WHAT HAPPEN WHEN ON TCP
 		if (retval != ISIS_OK) {
 			flog_err(EC_ISIS_PACKET,
 				 "ISIS-Snp (%s): Send L%d PSNP on %s failed",
@@ -2506,7 +2547,8 @@ void send_lsp(struct isis_circuit *circuit, struct isis_lsp *lsp,
 out:
 	if (clear_srm
 	    || (retval == ISIS_OK && circuit->circ_type == CIRCUIT_T_BROADCAST)
-	    || (retval != ISIS_OK && retval != ISIS_WARNING)) {
+	    || (retval != ISIS_OK && retval != ISIS_WARNING)
+		|| circuit->tcp_connected) {
 		/* SRM flag will trigger retransmission. We will not retransmit
 		 * if we
 		 * encountered a fatal error.
@@ -2516,6 +2558,7 @@ out:
 		 * to clear
 		 * the fag.
 		 */
+		lsp_set_all_srmflags(lsp, false);
 		isis_tx_queue_del(circuit->tx_queue, lsp);
 	}
 }

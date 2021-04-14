@@ -403,15 +403,19 @@ int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_ls
 
 	if(is_lsp){
 		//DO ONE THING TO READ ON TCP SOCKET
+		size_t length = 0;
+		if(circuit->is_partial_packet){
+			length = stream_get_endp(circuit->tcp_buffer);
+			stream_write(circuit->rcv_stream, circuit->tcp_buffer->data, length);
+			circuit->is_partial_packet = false;
+		}
 		unsigned int max_size =
 			circuit->interface->mtu > circuit->interface->mtu6
 				? circuit->interface->mtu
 				: circuit->interface->mtu6;
-		uint8_t temp_buff[max_size - LLC_LEN];
-		zlog_debug("MAX BUFFER SIZE %u", max_size);
-		zlog_debug("MAX RCV BUFFER SIZE %zu", circuit->rcv_stream->size);
+		uint8_t temp_buff[max_size - LLC_LEN - length];
 		bytesread =
-			recvfrom(circuit->tcp_fd, temp_buff, max_size - LLC_LEN, MSG_DONTWAIT,
+			recvfrom(circuit->tcp_fd, temp_buff, max_size - LLC_LEN - length, MSG_DONTWAIT,
 				NULL, 0);
 		if (bytesread < 0) {
 			zlog_warn("%s: recvfrom() failed", __func__);
@@ -424,7 +428,7 @@ int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa, bool is_ls
 		memcpy(ssnpa, &s_addr.sll_addr, s_addr.sll_halen);
 
 		return ISIS_OK;
-	}else{
+	} else {
 		bytesread =
 			recvfrom(circuit->fd, (void *)&llc, LLC_LEN, MSG_PEEK,
 				(struct sockaddr *)&s_addr, (socklen_t *)&addr_len);

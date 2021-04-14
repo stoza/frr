@@ -89,6 +89,8 @@ struct isis_circuit {
 	bool tcp_connected;
 	bool not_listening; // use to not add a read_thread every time on the tcp_socket
 	uint16_t tcp_port; /* the port to connect with tcp */
+	struct stream *tcp_buffer; //use when the lsp had been cut in half by tcp.
+	bool is_partial_packet;
 	/*
 	 * Threads
 	 */
@@ -223,7 +225,7 @@ ferr_r isis_circuit_passwd_hmac_md5_set(struct isis_circuit *circuit,
 int isis_circuit_mt_enabled_set(struct isis_circuit *circuit, uint16_t mtid,
 				bool enabled);
 
-int test(struct thread *thread);
+void isis_circuit_tcp_stream(struct isis_circuit *circuit, struct stream **stream, size_t pdu_size);
 
 #ifdef FABRICD
 DECLARE_HOOK(isis_circuit_config_write,

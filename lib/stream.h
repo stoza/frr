@@ -238,6 +238,8 @@ extern int stream_putd(struct stream *, double);
    Use stream_read_try instead.  */
 extern int stream_read(struct stream *, int, size_t);
 
+extern void stream_copy_part(struct stream *dest, const struct stream *src, size_t offset);
+
 /* Read up to size bytes into the stream.
    Return code:
      >0: number of bytes read

@@ -124,6 +124,8 @@ struct isis_circuit *isis_circuit_new(struct isis *isis)
 		"/frr-interface:lib/interface/frr-isisd:isis/metric/level-2");
 	circuit->tcp_connected = false;
 	circuit->not_listening = true;
+	circuit->tcp_buffer = NULL;
+	circuit->is_partial_packet = false;
 
 	for (i = 0; i < 2; i++) {
 		circuit->level_arg[i].level = i + 1;
@@ -589,6 +591,17 @@ void isis_circuit_stream(struct isis_circuit *circuit, struct stream **stream)
 	} else {
 		if (STREAM_SIZE(*stream) != stream_size)
 			stream_resize_inplace(stream, stream_size);
+		stream_reset(*stream);
+	}
+}
+
+void isis_circuit_tcp_stream(struct isis_circuit *circuit, struct stream **stream, size_t pdu_size)
+{
+	if(!*stream){
+		*stream = stream_new(pdu_size);
+	} else {
+		if(STREAM_SIZE(*stream) != pdu_size)
+			stream_resize_inplace(stream, pdu_size);
 		stream_reset(*stream);
 	}
 }
