@@ -1455,12 +1455,11 @@ static int process_snp(uint8_t pdu_type, struct isis_circuit *circuit,
 	bool resync_needed = false;
 
 	/* 7.3.15.2 b) Actions on LSP_ENTRIES reported */
-	for (struct isis_lsp_entry *entry = entry_head; entry;
-	     entry = entry->next) {
-		struct isis_lsp *lsp =
-			lsp_search(&circuit->area->lspdb[level - 1], entry->id);
-		bool own_lsp = !memcmp(entry->id, circuit->isis->sysid,
-				       ISIS_SYS_ID_LEN);
+	for (struct isis_lsp_entry *entry = entry_head; entry; entry = entry->next) {
+		
+		struct isis_lsp *lsp = lsp_search(&circuit->area->lspdb[level - 1], entry->id);
+		bool own_lsp = !memcmp(entry->id, circuit->isis->sysid, ISIS_SYS_ID_LEN);
+		
 		if (lsp) {
 			/* 7.3.15.2 b) 1) is this LSP newer */
 			int cmp = lsp_compare(circuit->area->area_tag, lsp,
@@ -1756,8 +1755,8 @@ int isis_handle_pdu(struct isis_circuit *circuit, uint8_t *ssnpa)
 				&& pdu_type != FS_LINK_STATE)
 				return ISIS_ERROR;
 			retval = process_lsp(pdu_type, circuit, ssnpa, max_area_addrs);
-			zlog_debug("THE STREAM is %s", (stream_get_getp(circuit->rcv_stream) == stream_get_endp(circuit->rcv_stream))
-											? "EMPTY" : "NOT EMPTY");
+			//zlog_debug("THE STREAM is %s", (stream_get_getp(circuit->rcv_stream) == stream_get_endp(circuit->rcv_stream))
+			//								? "EMPTY" : "NOT EMPTY");
 			break;
 		case L1_COMPLETE_SEQ_NUM:
 		case L2_COMPLETE_SEQ_NUM:

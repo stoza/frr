@@ -225,8 +225,8 @@ int open_connection(struct thread *thread)
 */
 static int open_tcp_socket(struct isis_circuit *circuit)
 {
-	//TODO better to do a check of the validity of the ip
-	if(strcmp(circuit->interface->name, "enp1s0f0") != 0){
+	//TODO better to do a check of the validity of the ip //enp1s0f0
+	if(strcmp(circuit->interface->name, "enp0s10") != 0){
 		printf("pas enp0s10\n");
 		return ISIS_OK;
 	}
@@ -315,8 +315,12 @@ void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *c
 
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = inet_addr("42.2.1.2");// TODO address->addr;
+	servaddr.sin_addr.s_addr = inet_addr("10.10.10.3");// TODO address->addr;
 	servaddr.sin_port = htons(circuit->tcp_port);
+
+	char ip4[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &address->addr, ip4, INET_ADDRSTRLEN);
+	zlog_debug("THE IP is : %s", ip4);
 
 	if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) != 0){
 		zlog_warn("Connection with the server failed... \n");
