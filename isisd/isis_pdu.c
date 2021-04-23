@@ -1486,7 +1486,9 @@ static int process_snp(uint8_t pdu_type, struct isis_circuit *circuit,
 					isis_tx_queue_add(circuit->tx_queue, lsp,
 							TX_LSP_NORMAL);
 				} else {
-					ISIS_SET_FLAG(lsp->SSNflags, circuit);
+					//if c est tcp pas besoin de hack
+					if(!circuit->tcp_connected)
+						ISIS_SET_FLAG(lsp->SSNflags, circuit);
 					/* if (circuit->circ_type !=
 					 * CIRCUIT_T_BROADCAST) */
 					isis_tx_queue_del(circuit->tx_queue, lsp);
@@ -1524,7 +1526,8 @@ static int process_snp(uint8_t pdu_type, struct isis_circuit *circuit,
 					   lsp);
 
 				lsp_set_all_srmflags(lsp, false);
-				ISIS_SET_FLAG(lsp->SSNflags, circuit);
+				if(!circuit->tcp_connected)
+					ISIS_SET_FLAG(lsp->SSNflags, circuit);
 				resync_needed = true;
 			}
 		}
