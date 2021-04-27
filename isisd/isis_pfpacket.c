@@ -268,6 +268,7 @@ int isis_recv_pdu_bcast(struct isis_circuit *circuit, uint8_t *ssnpa)
 
 		return ISIS_WARNING;
 	}
+	zlog_debug("Bytesread:%u",bytesread);
 	/*
 	 * Filtering by llc field, discard packets sent by this host (other
 	 * circuit)
