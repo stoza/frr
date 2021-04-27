@@ -1218,8 +1218,9 @@ dontcheckadj:
 			lsp_flood_or_update(lsp, circuit, circuit_scoped);
 
 			/* iv */
-			if (circuit->circ_type != CIRCUIT_T_BROADCAST)
+			if (circuit->circ_type != CIRCUIT_T_BROADCAST){
 				ISIS_SET_FLAG(lsp->SSNflags, circuit);
+			}
 			/* FIXME: v) */
 		}
 		/* 7.3.15.1 e) 2) LSP equal to the one in db */
@@ -1228,8 +1229,9 @@ dontcheckadj:
 			lsp_update(lsp, &hdr, tlvs, circuit->rcv_stream,
 				   circuit->area, level, false);
 			tlvs = NULL;
-			if (circuit->circ_type != CIRCUIT_T_BROADCAST)
+			if (circuit->circ_type != CIRCUIT_T_BROADCAST){
 				ISIS_SET_FLAG(lsp->SSNflags, circuit);
+			}
 		}
 		/* 7.3.15.1 e) 3) LSP older than the one in db */
 		else {
@@ -1491,7 +1493,8 @@ static int process_snp(uint8_t pdu_type, struct isis_circuit *circuit,
 					   lsp);
 
 				lsp_set_all_srmflags(lsp, false);
-				ISIS_SET_FLAG(lsp->SSNflags, circuit);
+				if(!is_csnp)
+					ISIS_SET_FLAG(lsp->SSNflags, circuit);
 				resync_needed = true;
 			}
 		}
@@ -2340,9 +2343,11 @@ int send_l1_psnp(struct thread *thread)
 
 	send_psnp(1, circuit);
 	/* set next timer thread */
-	thread_add_timer(master, send_l1_psnp, circuit,
-			 isis_jitter(circuit->psnp_interval[0], PSNP_JITTER),
-			 &circuit->t_send_psnp[0]);
+	if(circuit->circ_type == CIRCUIT_T_BROADCAST){
+		thread_add_timer(master, send_l1_psnp, circuit,
+			 	isis_jitter(circuit->psnp_interval[0], PSNP_JITTER),
+			 	&circuit->t_send_psnp[0]);
+	}
 
 	return ISIS_OK;
 }
