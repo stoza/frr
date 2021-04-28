@@ -1218,7 +1218,8 @@ dontcheckadj:
 			lsp_flood_or_update(lsp, circuit, circuit_scoped);
 
 			/* iv */
-			if (circuit->circ_type != CIRCUIT_T_BROADCAST){
+			if (circuit->circ_type == CIRCUIT_T_P2P){
+				ack_lsp(&hdr, circuit, level);
 				ISIS_SET_FLAG(lsp->SSNflags, circuit);
 			}
 			/* FIXME: v) */
@@ -1493,7 +1494,7 @@ static int process_snp(uint8_t pdu_type, struct isis_circuit *circuit,
 					   lsp);
 
 				lsp_set_all_srmflags(lsp, false);
-				if(!is_csnp)
+				if(!is_csnp && circuit->circ_type != CIRCUIT_T_P2P)
 					ISIS_SET_FLAG(lsp->SSNflags, circuit);
 				resync_needed = true;
 			}
@@ -2344,6 +2345,7 @@ int send_l1_psnp(struct thread *thread)
 	send_psnp(1, circuit);
 	/* set next timer thread */
 	if(circuit->circ_type == CIRCUIT_T_BROADCAST){
+		zlog_debug("RESCHEDULING PSNP");
 		thread_add_timer(master, send_l1_psnp, circuit,
 			 	isis_jitter(circuit->psnp_interval[0], PSNP_JITTER),
 			 	&circuit->t_send_psnp[0]);
