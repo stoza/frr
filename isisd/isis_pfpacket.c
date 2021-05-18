@@ -316,7 +316,7 @@ void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *c
 
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = inet_addr(ip4);// TODO address->addr;
+	servaddr.sin_addr = a->addr; 
 	servaddr.sin_port = htons(circuit->tcp_port);
 
 	if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) != 0){
