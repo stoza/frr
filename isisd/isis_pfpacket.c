@@ -225,11 +225,8 @@ int open_connection(struct thread *thread)
 */
 static int open_tcp_socket(struct isis_circuit *circuit)
 {
-	//TODO better to do a check of the validity of the ip //enp1s0f0
-	if(strcmp(circuit->interface->name, "enp0s10") != 0){
-		printf("pas enp0s10\n");
-		return ISIS_OK;
-	}
+	zlog_debug("OPENING TCP SOCKET ON INTERFACE %s", circuit->interface->name);
+
 	struct sockaddr_in servaddr;
 	int tcp_sock, retval = ISIS_OK;
 	struct vrf *vrf = NULL;
@@ -305,7 +302,7 @@ static int open_tcp_socket(struct isis_circuit *circuit)
 void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *circuit)
 {
 	struct sockaddr_in servaddr;
-	struct isis_ipv4_address *address = (struct isis_ipv4_address *)addresse;
+	struct isis_ipv4_address *a = (struct isis_ipv4_address *)addresse->head;
 
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if(sockfd == -1){
@@ -313,17 +310,17 @@ void open_tcp_connection(struct isis_item_list *addresse, struct isis_circuit *c
 		return;
 	}
 
-	bzero(&servaddr, sizeof(servaddr));
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = inet_addr("10.10.10.3");// TODO address->addr;
-	servaddr.sin_port = htons(circuit->tcp_port);
-
 	char ip4[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &address->addr, ip4, INET_ADDRSTRLEN);
+	inet_ntop(AF_INET, &a->addr, ip4, sizeof(ip4));
 	zlog_debug("THE IP is : %s", ip4);
 
+	bzero(&servaddr, sizeof(servaddr));
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = inet_addr(ip4);// TODO address->addr;
+	servaddr.sin_port = htons(circuit->tcp_port);
+
 	if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) != 0){
-		zlog_warn("Connection with the server failed... \n");
+		zlog_warn("Connection with the server failed... %s \n", strerror(errno));
 		return;
 	}
 

@@ -698,7 +698,7 @@ static int process_hello(uint8_t pdu_type, struct isis_circuit *circuit,
 	if((!circuit->tcp_port || iih.tlvs->tcp_port.port < circuit->tcp_port) && iih.tlvs->tcp_port.port != 0 && !circuit->tcp_connected){
 		zlog_debug("WE WILL BE THE CLIENT\n");
 		circuit->tcp_port = iih.tlvs->tcp_port.port;
-		open_tcp_connection(&iih.tlvs->ipv4_address, circuit);
+		open_tcp_connection(&(iih.tlvs->ipv4_address), circuit);
 	}
 
 	if (!iih.tlvs->area_addresses.count) {
